@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>hrns: the fast, battery-friendly desktop app for Codex</title>
+  <meta name="description" content="hrns is a free, open-source desktop app for OpenAI's Codex agent, built in Rust. Use your ChatGPT subscription, run the real agent in your projects, track usage across accounts, and control it all from your phone." />
+  <meta name="theme-color" content="#08080a" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="hrns: Codex, at home on your desktop" />
+  <meta property="og:description" content="A fast, battery-friendly desktop app for Codex, built in Rust. Your ChatGPT plan, the real agent, multiple accounts, a usage dashboard and a phone remote." />
+  <meta property="og:image" content="https://ghaythbenabid.github.io/hrns/screenshots/chat.png" />
+  <meta property="og:url" content="https://ghaythbenabid.github.io/hrns/" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <style>
+    :root {
+      --bg: #08080a;
+      --bg-2: #0c0c0e;
+      --panel: #111113;
+      --raised: #18181b;
+      --border: #232327;
+      --border-soft: #1b1b1f;
+      --text: #ececf1;
+      --muted: #9a9aa5;
+      --faint: #62626c;
+      --accent: #a78bfa;
+      --accent-2: #7c5cff;
+      --green: #4ade80;
+      --red: #f87171;
+      --amber: #fbbf24;
+      --blue: #3987e5;
+      --radius: 18px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+      --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 16px/1.6 var(--font); -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+    code, pre, kbd { font-family: var(--mono); }
+    .wrap { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+    section { position: relative; }
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+    /* ---------- nav ---------- */
+    .nav {
+      position: sticky; top: 0; z-index: 50;
+      background: color-mix(in srgb, var(--bg) 78%, transparent);
+      backdrop-filter: saturate(140%) blur(14px); -webkit-backdrop-filter: saturate(140%) blur(14px);
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .nav .wrap { display: flex; align-items: center; gap: 28px; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+    .brand img { width: 28px; height: 28px; }
+    .links { display: flex; gap: 24px; margin-left: 8px; }
+    .links a { color: var(--muted); font-size: 14.5px; }
+    .links a:hover { color: var(--text); }
+    .nav .spacer { flex: 1; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+      height: 44px; padding: 0 20px; border-radius: 12px; font-weight: 600; font-size: 15px;
+      border: 1px solid var(--border); background: var(--panel); color: var(--text);
+      transition: background .15s, border-color .15s, transform .15s;
+    }
+    .btn:hover { background: var(--raised); border-color: #2f2f35; }
+    .btn.primary { background: var(--text); color: var(--bg); border-color: transparent; }
+    .btn.primary:hover { background: #fff; }
+    .btn.sm { height: 38px; padding: 0 15px; font-size: 14px; border-radius: 10px; }
+    .btn svg { flex: none; }
+    @media (max-width: 900px) { .links { display: none; } }
+
+    /* ---------- hero ---------- */
+    .hero { padding: 96px 0 40px; text-align: center; overflow: hidden; }
+    .glow {
+      position: absolute; inset: -200px 0 auto; height: 900px; pointer-events: none; z-index: -1;
+      background:
+        radial-gradient(700px 380px at 50% 18%, rgba(167,139,250,.22), transparent 70%),
+        radial-gradient(500px 300px at 20% 45%, rgba(57,135,229,.10), transparent 70%),
+        radial-gradient(500px 300px at 80% 45%, rgba(124,92,255,.10), transparent 70%);
+    }
+    .grid-bg {
+      position: absolute; inset: 0 0 auto; height: 760px; z-index: -1; pointer-events: none; opacity: .35;
+      background-image: linear-gradient(var(--border-soft) 1px, transparent 1px), linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
+      background-size: 56px 56px;
+      mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 30%, transparent 75%);
+      -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 30%, transparent 75%);
+    }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 10px; padding: 6px 14px 6px 8px; border-radius: 999px;
+      border: 1px solid var(--border); background: rgba(17,17,19,.7); color: var(--muted); font-size: 13.5px;
+    }
+    .eyebrow .tag { padding: 2px 9px; border-radius: 999px; background: rgba(167,139,250,.14); color: var(--accent); font-weight: 600; font-size: 12px; }
+    h1 {
+      font-family: var(--display); font-size: clamp(42px, 7vw, 78px); line-height: 1.02; letter-spacing: -0.035em;
+      font-weight: 750; margin: 26px auto 0; max-width: 900px;
+    }
+    .grad { background: linear-gradient(120deg, #fff 10%, #c9b8ff 45%, var(--accent) 70%, #6ea8ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lede { color: var(--muted); font-size: clamp(17px, 2vw, 20px); max-width: 680px; margin: 24px auto 0; line-height: 1.55; }
+    .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
+    .meta { margin-top: 18px; color: var(--faint); font-size: 13.5px; display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
+    .meta span::before { content: "✓"; color: var(--green); margin-right: 7px; font-weight: 700; }
+
+    .window {
+      margin: 64px auto 0; max-width: 1120px; border-radius: 16px; overflow: hidden;
+      border: 1px solid #2a2a30; background: var(--bg-2);
+      box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 50px 120px rgba(0,0,0,.65), 0 0 120px rgba(124,92,255,.12);
+    }
+    .window .bar { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 16px; background: #121215; border-bottom: 1px solid var(--border-soft); }
+    .window .bar i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+    .window .bar i:nth-child(1) { background: #ff5f57; } .window .bar i:nth-child(2) { background: #febc2e; } .window .bar i:nth-child(3) { background: #28c840; }
+    .window .bar span { flex: 1; text-align: center; color: var(--faint); font-size: 12.5px; margin-right: 52px; }
+    .window img { width: 100%; height: auto; }
+
+    /* ---------- stats ---------- */
+    .stats { padding: 72px 0 24px; }
+    .stats .row { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+    .stat { padding: 26px 24px; border-right: 1px solid var(--border); }
+    .stat:last-child { border-right: 0; }
+    .stat b { display: block; font-family: var(--display); font-size: 32px; letter-spacing: -0.02em; font-weight: 700; }
+    .stat span { color: var(--muted); font-size: 14px; }
+    @media (max-width: 820px) { .stats .row { grid-template-columns: 1fr 1fr; } .stat:nth-child(2) { border-right: 0; } .stat:nth-child(-n+2) { border-bottom: 1px solid var(--border); } }
+
+    /* ---------- section heads ---------- */
+    .section { padding: 110px 0 0; }
+    .kicker { color: var(--accent); font-weight: 650; font-size: 13.5px; letter-spacing: .08em; text-transform: uppercase; }
+    h2 { font-family: var(--display); font-size: clamp(32px, 4.4vw, 50px); line-height: 1.08; letter-spacing: -0.03em; font-weight: 720; margin: 12px 0 0; }
+    .sub { color: var(--muted); font-size: 18px; max-width: 640px; margin-top: 16px; }
+    .center { text-align: center; }
+    .center .sub { margin-left: auto; margin-right: auto; }
+
+    /* ---------- features grid ---------- */
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 48px; }
+    @media (max-width: 980px) { .features { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 640px) { .features { grid-template-columns: 1fr; } }
+    .card {
+      padding: 26px; border-radius: var(--radius); border: 1px solid var(--border);
+      background: linear-gradient(180deg, #131316, var(--panel));
+    }
+    .card .ico {
+      width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 18px;
+      background: rgba(167,139,250,.1); border: 1px solid rgba(167,139,250,.22); color: var(--accent);
+    }
+    .card h3 { margin: 0 0 8px; font-size: 18px; letter-spacing: -0.01em; }
+    .card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+    /* ---------- spotlight ---------- */
+    .spot { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 64px; align-items: center; padding-top: 120px; }
+    .spot.flip { grid-template-columns: 1.1fr 0.9fr; }
+    .spot.flip .copy { order: 2; }
+    @media (max-width: 980px) { .spot, .spot.flip { grid-template-columns: 1fr; gap: 36px; } .spot.flip .copy { order: 0; } }
+    .copy h2 { font-size: clamp(28px, 3.4vw, 40px); }
+    .ticks { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 14px; }
+    .ticks li { display: flex; gap: 12px; color: var(--muted); font-size: 15.5px; }
+    .ticks li b { color: var(--text); font-weight: 600; }
+    .ticks svg { flex: none; margin-top: 4px; color: var(--accent); }
+    .shot { border-radius: 14px; overflow: hidden; border: 1px solid #2a2a30; box-shadow: 0 30px 80px rgba(0,0,0,.55); background: var(--bg-2); }
+    .shot img { width: 100%; height: auto; }
+    .mini { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .chip { font: 12.5px var(--mono); padding: 5px 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--border); color: var(--muted); }
+    .chip.g { color: var(--green); } .chip.r { color: var(--red); } .chip.a { color: var(--accent); }
+
+    /* ---------- mobile ---------- */
+    .mobile { margin-top: 130px; padding: 90px 0 70px; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft);
+      background: radial-gradient(900px 420px at 50% 0%, rgba(167,139,250,.12), transparent 70%), var(--bg-2); }
+    .mobile .phones { margin-top: 48px; }
+    .mobile .phones img { width: 100%; height: auto; }
+    .trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+    @media (max-width: 860px) { .trio { grid-template-columns: 1fr; } }
+
+    /* ---------- architecture ---------- */
+    .arch { margin-top: 48px; display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 14px; align-items: stretch; }
+    .node { padding: 22px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); }
+    .node h4 { margin: 0 0 6px; font-size: 16px; }
+    .node p { margin: 0; color: var(--muted); font-size: 14px; }
+    .node ul { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+    .node.hl { border-color: rgba(167,139,250,.4); background: linear-gradient(180deg, rgba(167,139,250,.08), var(--panel)); }
+    .arrow { display: grid; place-items: center; color: var(--faint); font: 13px var(--mono); text-align: center; }
+    @media (max-width: 900px) { .arch { grid-template-columns: 1fr; } .arrow { transform: rotate(90deg); padding: 6px 0; } }
+
+    /* ---------- privacy ---------- */
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 44px; }
+    @media (max-width: 820px) { .two { grid-template-columns: 1fr; } }
+
+    /* ---------- install ---------- */
+    .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 44px; }
+    @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
+    .code {
+      position: relative; margin: 14px 0 0; border-radius: 12px; border: 1px solid var(--border); background: #0b0b0d; overflow: hidden;
+    }
+    .code pre { margin: 0; padding: 16px 18px; overflow-x: auto; font-size: 13.5px; line-height: 1.75; color: #d4d4d8; }
+    .code .c { color: var(--faint); }
+    .code .p { color: var(--accent); user-select: none; }
+    .copy-btn {
+      position: absolute; top: 8px; right: 8px; height: 28px; padding: 0 10px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--raised); color: var(--muted); font: 12px var(--font); cursor: pointer;
+    }
+    .copy-btn:hover { color: var(--text); }
+    .req { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 10px; }
+    .req li { display: flex; gap: 10px; align-items: flex-start; color: var(--muted); font-size: 15px; }
+    .req li b { color: var(--text); font-weight: 600; }
+    .num { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12.5px; font-weight: 700; background: var(--raised); color: var(--accent); border: 1px solid var(--border); }
+
+    /* ---------- shortcuts ---------- */
+    .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
+    @media (max-width: 760px) { .keys { grid-template-columns: 1fr 1fr; } }
+    .key { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 14px; }
+    kbd { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--raised); border: 1px solid var(--border); border-bottom-width: 2px; color: var(--text); }
+
+    /* ---------- faq ---------- */
+    .faq { max-width: 820px; margin: 44px auto 0; }
+    details { border-bottom: 1px solid var(--border); }
+    summary {
+      list-style: none; cursor: pointer; padding: 22px 4px; font-size: 17px; font-weight: 600;
+      display: flex; justify-content: space-between; gap: 16px; align-items: center;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: var(--faint); font-size: 22px; font-weight: 400; transition: transform .2s; }
+    details[open] summary::after { transform: rotate(45deg); }
+    details p { margin: -6px 4px 22px; color: var(--muted); font-size: 15.5px; }
+    details code { font-size: 13.5px; background: var(--raised); border: 1px solid var(--border); padding: 1px 6px; border-radius: 6px; }
+
+    /* ---------- final cta / footer ---------- */
+    .final { margin-top: 130px; padding: 90px 24px; text-align: center; border-radius: 28px; border: 1px solid var(--border);
+      background: radial-gradient(600px 300px at 50% 0%, rgba(167,139,250,.2), transparent 70%), var(--panel); }
+    footer { margin-top: 90px; padding: 36px 0 48px; border-top: 1px solid var(--border-soft); color: var(--faint); font-size: 13.5px; }
+    footer .wrap { display: flex; gap: 20px; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--text); }
+    footer .fl { display: flex; gap: 20px; }
+  </style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="icon.svg" alt="" width="28" height="28" />hrns</a>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#mobile">Mobile</a>
+      <a href="#usage">Usage</a>
+      <a href="#how">How it works</a>
+      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <div class="spacer"></div>
+    <a class="btn sm" href="https://github.com/GhaythBenAbid/hrns">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="glow"></div>
+  <div class="grid-bg"></div>
+  <div class="wrap">
+    <a class="eyebrow" href="#mobile"><span class="tag">New</span> Control Codex from your phone over Tailscale →</a>
+    <h1>Codex, at home<br /><span class="grad">on your desktop.</span></h1>
+    <p class="lede">hrns is a fast, battery-friendly desktop app for OpenAI's Codex agent. It uses your ChatGPT subscription and runs the real agent inside your projects. Juggle several accounts, see what every turn would cost, and approve commands from your phone.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>
+        Get started
+      </a>
+      <a class="btn" href="https://github.com/GhaythBenAbid/hrns">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5 14.9 8.4l6.5.9-4.7 4.6 1.1 6.5L12 17.3l-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9Z"/></svg>
+        Star on GitHub
+      </a>
+    </div>
+    <div class="meta"><span>Free &amp; open source (MIT)</span><span>No API key</span><span>Native Rust core</span><span>Runs locally on your Mac</span></div>
+
+    <div class="window">
+      <div class="bar"><i></i><i></i><i></i><span>hrns</span></div>
+      <img src="screenshots/chat.png" width="2880" height="1800" alt="hrns showing a Codex chat: grouped steps, file edits with line counts, a markdown answer with a code block, and the session sidebar with costs." />
+    </div>
+  </div>
+</header>
+
+<section class="stats" aria-label="Highlights">
+  <div class="wrap">
+    <div class="row">
+      <div class="stat"><b>0</b><span>background polling: everything is event-driven</span></div>
+      <div class="stat"><b>10 min</b><span>idle before each Codex process shuts down</span></div>
+      <div class="stat"><b>~1 s</b><span>to scan 600 MB of Codex history (then ~15 ms)</span></div>
+      <div class="stat"><b>N</b><span>ChatGPT accounts, running side by side</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <div class="wrap center">
+    <div class="kicker">Features</div>
+    <h2>Everything you liked about Codex.<br />Nothing that drains your battery.</h2>
+    <p class="sub">A native Rust core drives the official Codex app-server, and a clean interface lets you see, steer and approve the agent's work.</p>
+  </div>
+  <div class="wrap">
+    <div class="features">
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg></div>
+        <h3>Your ChatGPT plan, no API key</h3>
+        <p>Sign in with ChatGPT like the Codex CLI does. Your Plus or Pro subscription pays for the work, so there are no per-token bills.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 7 5 5-5 5M13 17h6"/></svg></div>
+        <h3>The real Codex agent</h3>
+        <p>The same agent instructions, plus your <code>config.toml</code>, MCP servers, skills and <code>AGENTS.md</code>. Nothing is re-implemented or watered down.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6Z"/></svg></div>
+        <h3>Projects &amp; permissions</h3>
+        <p>Every chat works in a project folder. Pick <b>Read only</b>, <b>Auto</b> (edit inside the project, ask for anything else) or <b>Full access</b>.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+        <h3>Inline approvals</h3>
+        <p>When Codex needs to leave the sandbox, an approval card appears in the chat: <b>Approve</b>, <b>Approve for this chat</b> or <b>Deny</b>. <kbd>⌘</kbd> <kbd>↵</kbd> approves.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5M9 14h6M12 11v6"/></svg></div>
+        <h3>Readable activity</h3>
+        <p>Steps collapse into one line, like "Explored 4 files, 2 searches". Commands read as <i>Read</i>, <i>Searched</i> and <i>Ran</i>, and edits show <code>+12 −3</code> with colored diffs.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M17 3.5a4 4 0 0 1 0 9M22 21a7 7 0 0 0-4-6.3"/></svg></div>
+        <h3>Multiple ChatGPT accounts</h3>
+        <p>Connect several accounts and pick one per chat. Chats on different accounts run in parallel, and each account shows its 5-hour and weekly limits.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 20V12M12 20V5M19 20v-9"/></svg></div>
+        <h3>Usage dashboard</h3>
+        <p>Daily cost and tokens by source, model and day, with cache savings. It covers hrns chats <i>and</i> your Codex CLI, IDE and app sessions.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg></div>
+        <h3>A session list that tells you things</h3>
+        <p>Chats are grouped by project, each showing its live status, a preview, the model, lines changed, tokens and an estimated cost. Click the badges for a breakdown.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
+        <h3>A remote in your pocket</h3>
+        <p>A companion phone app reaches your Mac over Tailscale. You can follow chats live, send prompts, stop turns, approve commands and get notified.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="spot">
+    <div class="copy">
+      <div class="kicker">Clarity</div>
+      <h2>See exactly what Codex is doing.</h2>
+      <p class="sub">Agents do a lot between your prompt and their answer. hrns turns that noise into something you can read at a glance.</p>
+      <ul class="ticks">
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Grouped steps.</b> Reads, searches and commands collapse into one line while Codex works, and expand on click.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Clean commands.</b> Shell wrappers are hidden, paths are shown relative to the project, and every step has its duration and exit code.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Real diffs.</b> Every file Codex creates, edits or deletes, with exact line counts.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Live streaming.</b> Answers render as rich markdown, with tables and highlighted code you can copy in one click.</span></li>
+      </ul>
+      <div class="mini"><span class="chip a">Explored 4 files, 2 searches</span><span class="chip">Ran bun run check · 3.4s</span><span class="chip g">+86</span><span class="chip r">−12</span></div>
+    </div>
+    <div class="shot"><img loading="lazy" src="screenshots/chat.png" width="2880" height="1800" alt="A chat in hrns with grouped steps, edited files and a formatted answer." /></div>
+  </div>
+
+  <div class="spot flip">
+    <div class="copy">
+      <div class="kicker">Start fast</div>
+      <h2>Begin in the right place, every time.</h2>
+      <p class="sub">New chats open centred on your project: its folder, its git branch, your recent chats there, and smart starting points.</p>
+      <ul class="ticks">
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Project and branch</b> at a glance, with one click to switch folders.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Model, reasoning effort, permissions and account</b>, right in the composer.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Suggestions that write real prompts:</b> explain the codebase, fix a bug, write tests, summarise recent work.</span></li>
+      </ul>
+    </div>
+    <div class="shot"><img loading="lazy" src="screenshots/home.png" width="2880" height="1800" alt="The new-chat screen with project and branch pills, the composer and suggestion cards." /></div>
+  </div>
+</section>
+
+<section class="mobile" id="mobile">
+  <div class="wrap center">
+    <div class="kicker">Mobile</div>
+    <h2>Walk away. Codex keeps working.<br /><span class="grad">You stay in control.</span></h2>
+    <p class="sub">The hrns phone app connects to your Mac over Tailscale. Start something big, go make coffee, and approve the next command from your phone.</p>
+  </div>
+  <div class="wrap phones">
+    <img loading="lazy" src="screenshots/mobile.png" width="2800" height="1543" alt="Four phone screens: the chat list, a chat with steps and diffs, an approval request, and the usage dashboard." />
+  </div>
+  <div class="wrap">
+    <div class="trio">
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg></div>
+        <h3>Every chat, live</h3>
+        <p>Browse chats by project, watch answers stream in, send follow-ups, stop a turn, or start a new chat in any project.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></div>
+        <h3>Approve from a notification</h3>
+        <p>"Codex needs approval: <code>npm install</code>". Tap <b>Approve</b> or <b>Deny</b> right on the notification, and get pinged when a turn finishes.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Private by design</h3>
+        <p>Pair once by scanning a QR code. The connection only exists inside your tailnet, every request needs your token, and one tap unpairs every phone.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap" id="usage">
+  <div class="spot">
+    <div class="copy">
+      <div class="kicker">Usage</div>
+      <h2>Know what your work is worth.</h2>
+      <p class="sub">Your plan covers the work, but it's useful to see the scale. hrns prices every request at public API rates, so you can see where tokens go and how much caching saves.</p>
+      <ul class="ticks">
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>All your Codex usage,</b> not just hrns: CLI, IDE and app sessions are read from local transcripts, with each request counted once.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Daily cost and tokens</b> by source, model and day, over 7, 30 or 90 days.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Prices from models.dev,</b> fetched once and cached on your Mac.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Fast:</b> about 1 s to scan 600 MB of history the first time, then only new bytes are read.</span></li>
+      </ul>
+    </div>
+    <div class="shot"><img loading="lazy" src="screenshots/usage.png" width="2880" height="1920" alt="The usage dashboard: raw token cost, cost by source, a daily stacked bar chart, totals and a per-model breakdown." /></div>
+  </div>
+
+  <div class="spot flip">
+    <div class="copy">
+      <div class="kicker">Accounts</div>
+      <h2>Many accounts, one window.</h2>
+      <p class="sub">Work and personal accounts, or a spare for when you hit a limit. Each account signs in on its own, and they all share your Codex setup.</p>
+      <ul class="ticks">
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>One login per account,</b> with your config, MCP servers, skills and <code>AGENTS.md</code> shared across all of them.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Parallel by default:</b> chats on different accounts run at the same time.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Live limits</b> for each account's 5-hour and weekly windows, with reset times.</span></li>
+      </ul>
+    </div>
+    <div class="shot"><img loading="lazy" src="screenshots/accounts.png" width="2880" height="1800" alt="Settings showing two ChatGPT accounts with their usage limits and an Add account button." /></div>
+  </div>
+</section>
+
+<section class="section" id="how">
+  <div class="wrap center">
+    <div class="kicker">How it works</div>
+    <h2>Small, native, honest architecture.</h2>
+    <p class="sub">No bundled browser engine, no cloud relay, no re-implemented agent: just a thin, fast layer around tools you already trust.</p>
+  </div>
+  <div class="wrap">
+    <div class="arch">
+      <div class="node">
+        <h4>Interface</h4>
+        <p>Svelte 5, rendered by your system's WebView through Tauri 2, so there's no Chromium inside.</p>
+        <ul><li>Streaming capped at ~16 fps</li><li>GPU-only animations</li></ul>
+      </div>
+      <div class="arrow">IPC<br />→</div>
+      <div class="node hl">
+        <h4>Rust core</h4>
+        <p>Talks JSON-RPC to Codex over stdio and keeps everything local.</p>
+        <ul><li>One engine per account</li><li>Chat store &amp; usage ledger</li><li>models.dev price cache</li><li>Tailscale-only remote API</li></ul>
+      </div>
+      <div class="arrow">stdio<br />→</div>
+      <div class="node">
+        <h4>codex app-server</h4>
+        <p>The official Codex backend, started on first use and stopped after 10 idle minutes.</p>
+        <ul><li>Your ChatGPT login</li><li>Your config &amp; MCP servers</li></ul>
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9Z"/></svg></div>
+        <h3>Built to sip battery</h3>
+        <p>Nothing polls. Background processes exist only while you use them. History is saved once per turn, not once per token. If <code>codex</code> is the npm wrapper, hrns runs the native binary directly, so no Node.js process stays alive.</p>
+      </div>
+      <div class="card">
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Private by default</h3>
+        <p>Chats, usage and prices live in <code>~/Library/Application Support/dev.hrns.app</code>. hrns' only network request of its own is a one-time price download; talking to OpenAI is left to Codex. The phone server is off until you turn it on.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="install">
+  <div class="wrap center">
+    <div class="kicker">Get started</div>
+    <h2>Up and running in minutes.</h2>
+    <p class="sub">hrns is built from source for now. You'll need the Codex CLI signed in with ChatGPT, plus Rust and Bun.</p>
+  </div>
+  <div class="wrap">
+    <div class="steps">
+      <div class="card">
+        <h3>Desktop</h3>
+        <ul class="req">
+          <li><span class="num">1</span><span><b>Install the Codex CLI</b> and sign in with ChatGPT.</span></li>
+        </ul>
+        <div class="code"><button class="copy-btn" type="button">Copy</button><pre><span class="p">$ </span>npm i -g @openai/codex
+<span class="p">$ </span>codex login</pre></div>
+        <ul class="req" style="margin-top:18px">
+          <li><span class="num">2</span><span><b>Clone and run hrns.</b> Needs <a href="https://rustup.rs" style="color:var(--accent)">Rust</a> and <a href="https://bun.sh" style="color:var(--accent)">Bun</a>.</span></li>
+        </ul>
+        <div class="code"><button class="copy-btn" type="button">Copy</button><pre><span class="p">$ </span>git clone https://github.com/GhaythBenAbid/hrns.git
+<span class="p">$ </span>cd hrns && bun install
+<span class="p">$ </span>bun tauri build   <span class="c"># or: bun tauri dev</span></pre></div>
+        <p style="color:var(--faint);font-size:13.5px;margin:14px 0 0">The finished <code>.app</code> and <code>.dmg</code> land in <code>src-tauri/target/release/bundle</code>.</p>
+      </div>
+      <div class="card">
+        <h3>Phone (optional)</h3>
+        <ul class="req">
+          <li><span class="num">1</span><span><b>Install Tailscale</b> on your Mac and phone, and sign in to the same tailnet on both.</span></li>
+          <li><span class="num">2</span><span>In hrns, open <b>Settings → Remote</b> and turn it on. A pairing QR code appears.</span></li>
+          <li><span class="num">3</span><span><b>Run the app</b> with Expo and open it in Expo Go:</span></li>
+        </ul>
+        <div class="code"><button class="copy-btn" type="button">Copy</button><pre><span class="p">$ </span>cd mobile && npm install
+<span class="p">$ </span>REACT_NATIVE_PACKAGER_HOSTNAME=$(tailscale ip -4) \
+    npx expo start --lan</pre></div>
+        <ul class="req" style="margin-top:14px">
+          <li><span class="num">4</span><span>Tap <b>Scan pairing code</b> and point the phone at the QR code in hrns.</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin:48px 0 0;font-size:18px">Keyboard shortcuts</h3>
+    <div class="keys">
+      <div class="key">New chat <span><kbd>⌘</kbd> <kbd>N</kbd></span></div>
+      <div class="key">Search chats <span><kbd>⌘</kbd> <kbd>K</kbd></span></div>
+      <div class="key">Toggle sidebar <span><kbd>⌘</kbd> <kbd>B</kbd></span></div>
+      <div class="key">Settings <span><kbd>⌘</kbd> <kbd>,</kbd></span></div>
+      <div class="key">Approve request <span><kbd>⌘</kbd> <kbd>↵</kbd></span></div>
+      <div class="key">Stop / close <span><kbd>Esc</kbd></span></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="faq">
+  <div class="wrap center">
+    <div class="kicker">FAQ</div>
+    <h2>Questions, answered.</h2>
+  </div>
+  <div class="wrap">
+    <div class="faq">
+      <details open>
+        <summary>Is hrns free?</summary>
+        <p>Yes. hrns is free and open source under the MIT license. The AI work itself runs on your existing ChatGPT plan through Codex.</p>
+      </details>
+      <details>
+        <summary>Do I need an OpenAI API key?</summary>
+        <p>No. hrns signs in with your ChatGPT account through the Codex CLI, exactly like Codex does. The cost shown in the usage dashboard is an estimate of what the same work would cost through the API, for perspective only.</p>
+      </details>
+      <details>
+        <summary>Is this an official OpenAI product?</summary>
+        <p>No. hrns is an independent open-source project and isn't affiliated with or endorsed by OpenAI. It drives the official <code>codex app-server</code> that ships with the Codex CLI.</p>
+      </details>
+      <details>
+        <summary>Which platforms are supported?</summary>
+        <p>hrns is developed and tested on macOS (Apple Silicon). It's built with Tauri, so Linux and Windows builds are possible but untested so far. The phone app is built with Expo and runs on Android and iOS.</p>
+      </details>
+      <details>
+        <summary>Where is my data stored?</summary>
+        <p>On your Mac: chat history, usage records and the price cache live in <code>~/Library/Application Support/dev.hrns.app</code>. Your Codex login stays where Codex keeps it, in <code>~/.codex</code>, with one separate folder per extra account.</p>
+      </details>
+      <details>
+        <summary>How is usage counted?</summary>
+        <p>hrns reads the <code>token_count</code> events in Codex's own session logs (<code>~/.codex/sessions</code>) and uses Codex's running totals to count each request once, skipping the history copies that forked sessions start with. hrns' own chats are recorded as each turn finishes. Costs use models.dev prices for uncached input, cached input and output.</p>
+      </details>
+      <details>
+        <summary>Why does the phone app need Tailscale?</summary>
+        <p>So that only your devices can reach your Mac. The remote server listens only on your private Tailscale address, never on your Wi-Fi or the internet, and every request needs your pairing token. Your Mac has no public port and no cloud relay.</p>
+      </details>
+      <details>
+        <summary>Will I get notifications when the phone app is closed?</summary>
+        <p>In Expo Go, notifications arrive while the app is open or recently in the background. Push notifications that reach a fully closed app need a development build with Firebase; that's on the roadmap.</p>
+      </details>
+      <details>
+        <summary>Can hrns change my files or run commands?</summary>
+        <p>Only as much as you allow. <b>Read only</b> lets Codex read; <b>Auto</b> allows edits and commands inside the project folder and asks for anything else; <b>Full access</b> removes the sandbox. You choose per chat, and anything outside your chosen level shows up as an approval card.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="final">
+    <div class="kicker">hrns</div>
+    <h2>Give Codex a proper home.</h2>
+    <p class="sub" style="margin-left:auto;margin-right:auto">Fast, native and private, with your phone in the loop. Free and open source.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Get started</a>
+      <a class="btn" href="https://github.com/GhaythBenAbid/hrns">View source on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="icon.svg" alt="" width="24" height="24" />hrns</a>
+    <div class="fl">
+      <a href="https://github.com/GhaythBenAbid/hrns">GitHub</a>
+      <a href="https://github.com/GhaythBenAbid/hrns/blob/main/LICENSE">MIT License</a>
+      <a href="https://github.com/GhaythBenAbid/hrns/issues">Report an issue</a>
+    </div>
+    <span>Independent project, not affiliated with OpenAI. Codex and ChatGPT are trademarks of OpenAI.</span>
+  </div>
+</footer>
+
+<script>
+  // Copy buttons on code blocks (prompt markers and comments are skipped).
+  for (const btn of document.querySelectorAll(".copy-btn")) {
+    btn.addEventListener("click", async () => {
+      const pre = btn.parentElement.querySelector("pre").cloneNode(true);
+      pre.querySelectorAll(".p, .c").forEach((n) => n.remove());
+      try {
+        await navigator.clipboard.writeText(pre.textContent.trim());
+        btn.textContent = "Copied";
+      } catch {
+        btn.textContent = "Select & copy";
+      }
+      setTimeout(() => (btn.textContent = "Copy"), 1500);
+    });
+  }
+</script>
+</body>
+</html>
