@@ -34,6 +34,8 @@
   --body: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --col: 1160px;
+  --ease: cubic-bezier(.65, 0, .35, 1);   /* ease-in-out, used by every one-shot motion */
+  --ease-soft: cubic-bezier(.45, 0, .55, 1);
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
@@ -75,7 +77,7 @@ p { margin: 0; }
 .mark { display: flex; align-items: center; gap: 10px; text-decoration: none; font: 800 19px var(--display); letter-spacing: -0.02em; }
 .mark img { width: 26px; height: 26px; }
 .top nav { display: flex; gap: 22px; margin-left: auto; }
-.top nav a { text-decoration: none; color: var(--dim); font-size: 15px; }
+.top nav a { text-decoration: none; color: var(--dim); font-size: 15px; transition: color .3s var(--ease); }
 .top nav a:hover { color: var(--ink); }
 .gh {
   display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
@@ -110,7 +112,7 @@ p { margin: 0; }
 .term-bar span { margin-left: 8px; }
 .term-bar b { margin-left: auto; font-weight: 500; color: var(--dim); }
 .log { padding: 20px 20px 22px; font: 14px/1.75 var(--mono); overflow-x: auto; }
-.log > div { white-space: pre-wrap; animation: in .35s ease both; }
+.log > div { white-space: pre-wrap; animation: in .45s var(--ease) both; }
 .log .you { color: var(--ink); background: color-mix(in srgb, var(--violet) 10%, transparent); border-left: 2px solid var(--violet); padding: 8px 12px; margin-bottom: 12px; font-family: var(--body); font-size: 15px; white-space: normal; }
 .log .step { color: var(--dim); }
 .log .step b { color: var(--ink); font-weight: 500; }
@@ -118,7 +120,7 @@ p { margin: 0; }
 .log .no { color: var(--del); }
 .log .d { color: var(--faint); }
 .log > .ask { white-space: normal; }
-.ask { margin-top: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--rule)); border-radius: 10px; font-family: var(--body); animation: in .35s ease both; }
+.ask { margin-top: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--rule)); border-radius: 10px; font-family: var(--body); animation: in .45s var(--ease) both; }
 .ask p { font-size: 14.5px; }
 .ask p b { font-weight: 600; }
 .ask code { display: block; margin-top: 8px; font-size: 13px; color: var(--ink); }
@@ -130,6 +132,56 @@ p { margin: 0; }
 .l1 { animation-delay: .15s !important; } .l2 { animation-delay: .55s !important; } .l3 { animation-delay: .85s !important; }
 .l4 { animation-delay: 1.15s !important; } .l5 { animation-delay: 1.55s !important; } .l6 { animation-delay: 1.95s !important; }
 @keyframes in { from { opacity: 0; transform: translateY(4px); } }
+
+/* ---------- motion ---------- */
+/* Headline words rise in once on load. */
+.hero h1 .w { display: inline-block; animation: rise .7s var(--ease) both; }
+@keyframes rise { from { opacity: 0; transform: translateY(.35em); filter: blur(6px); } }
+.hero .lede, .hero .actions, .hero .facts { animation: rise .7s var(--ease) both; }
+.hero .lede { animation-delay: .35s; } .hero .actions { animation-delay: .45s; } .hero .facts { animation-delay: .55s; }
+.term { animation: rise .8s .2s var(--ease) both; }
+
+/* Live session pieces */
+.caret { display: inline-block; width: .55em; height: 1.05em; margin-left: 2px; vertical-align: -0.18em; background: var(--violet); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.spin { display: inline-block; width: .8em; height: .8em; margin-right: .5em; vertical-align: -0.05em; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--violet) 30%, transparent); border-top-color: var(--violet); animation: turn .8s linear infinite; }
+@keyframes turn { to { transform: rotate(360deg); } }
+.shimmer { background: linear-gradient(90deg, var(--faint), var(--ink), var(--faint)) 0 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sweep 1.4s linear infinite; }
+@keyframes sweep { to { background-position: -200% 0; } }
+.ask.pulse { animation: in .5s var(--ease) both, ring 1.4s .45s var(--ease-soft) 1; }
+@keyframes ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 45%, transparent); } 100% { box-shadow: 0 0 0 14px transparent; } }
+.replay { margin-left: 10px; background: none; border: 1px solid var(--rule); border-radius: 6px; color: var(--dim); font: 11.5px var(--mono); padding: 2px 8px; cursor: pointer; }
+.replay:hover { color: var(--ink); }
+.replay[hidden] { display: none; }
+
+/* Scroll reveals: elements rest fully visible; supporting browsers animate them in as they enter. */
+@supports (animation-timeline: view()) {
+  .reveal { animation: up both var(--ease); animation-timeline: view(); animation-range: entry 0% entry 40%; }
+  @keyframes up { from { opacity: 0; transform: translateY(40px) scale(.985); } }
+  .frame.reveal, .phones.reveal { animation-range: entry 0% entry 55%; }
+  .bar i { animation: fill both var(--ease); animation-timeline: view(); animation-range: entry 20% cover 45%; }
+  @keyframes fill { from { transform: scaleX(0); } }
+}
+
+/* Measurement bars */
+.readout div { grid-template-columns: minmax(0, 1fr) minmax(80px, 180px) auto; align-items: center; }
+.bar { height: 4px; border-radius: 4px; background: color-mix(in srgb, var(--rule) 70%, transparent); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 4px; background: var(--violet); transform-origin: left; }
+@media (max-width: 600px) { .readout div { grid-template-columns: minmax(0, 1fr) auto; } .bar { display: none; } }
+
+/* Diagram: a slow pulse travels along the arrows. */
+.flow { background: linear-gradient(90deg, var(--faint) 0%, var(--faint) 40%, var(--violet) 50%, var(--faint) 60%, var(--faint) 100%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: travel 3.6s var(--ease-soft) infinite; }
+@keyframes travel { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+
+/* Hover */
+.flag { transition: background .35s var(--ease); border-radius: 2px; }
+.flag:hover { background: color-mix(in srgb, var(--violet) 5%, transparent); }
+.flag code::after { content: "_"; opacity: 0; color: var(--violet); }
+.flag:hover code::after { animation: blink 1s steps(1) infinite; opacity: 1; }
+.btn, .gh { transition: transform .3s var(--ease), border-color .3s var(--ease), opacity .3s var(--ease); }
+.btn:hover, .gh:hover { transform: translateY(-1px); }
+.fig .frame, .plate .frame { transition: transform .5s var(--ease), box-shadow .5s var(--ease); }
+.fig .frame:hover { transform: translateY(-6px); box-shadow: 0 30px 60px -30px rgba(0,0,0,.6); }
 
 /* ---------- full product shot ---------- */
 .plate { padding-block: 24px 0; }
@@ -212,7 +264,9 @@ kbd { font-size: 12.5px; padding: 1px 7px; border: 1px solid var(--rule); border
 details { border-bottom: 1px solid var(--rule); }
 summary { cursor: pointer; list-style: none; padding-block: 22px; font: 600 18px var(--body); display: flex; justify-content: space-between; gap: 20px; }
 summary::-webkit-details-marker { display: none; }
-summary::after { content: "+"; font: 400 20px var(--mono); color: var(--faint); }
+summary::after { content: "+"; font: 400 20px var(--mono); color: var(--faint); transition: transform .4s var(--ease); }
+details[open] summary::after { transform: rotate(180deg); }
+details p { animation: in .45s var(--ease) both; }
 details[open] summary::after { content: "−"; }
 details p { color: var(--dim); padding-bottom: 24px; max-width: 42em; font-size: 16px; }
 details code { font-size: 14px; }
@@ -251,7 +305,7 @@ footer .legal { margin-left: auto; }
 <main>
 <section class="col hero" aria-labelledby="h1">
   <div>
-    <h1 id="h1">A quiet, fast home for <em>Codex.</em></h1>
+    <h1 id="h1"><span class="w">A</span> <span class="w" style="animation-delay:.06s">quiet,</span> <span class="w" style="animation-delay:.12s">fast</span> <span class="w" style="animation-delay:.18s">home</span> <span class="w" style="animation-delay:.24s">for</span> <em class="w" style="animation-delay:.3s">Codex.</em></h1>
     <p class="lede">hrns is a desktop app for OpenAI's Codex agent, written in Rust. It runs the real agent on your ChatGPT plan, shows you every step it takes, and lets you approve its next command from your phone.</p>
     <div class="actions">
       <a class="btn solid" href="#install">Install from source</a>
@@ -261,7 +315,7 @@ footer .legal { margin-left: auto; }
   </div>
 
   <div class="term" role="img" aria-label="A Codex session in hrns: the request, the files it explored, two edits, and an approval prompt.">
-    <div class="term-bar"><i></i><i></i><i></i><span>hrns · ~/code/hrns · main</span><b>GPT-6.1-Sol · Auto</b></div>
+    <div class="term-bar"><i></i><i></i><i></i><span>hrns · ~/code/hrns · main</span><b>GPT-6.1-Sol · Auto</b><button class="replay" type="button" id="replay" hidden>replay</button></div>
     <div class="log" id="log">
       <div class="you l1">Add a dark mode toggle to settings. Follow the system by default.</div>
       <div class="step l2"><b>Explored</b> 2 files, 1 search <span class="d">· 0.4s</span></div>
@@ -281,13 +335,13 @@ footer .legal { margin-left: auto; }
 
 <section class="col plate" aria-label="The app">
   <figure>
-    <div class="frame"><img src="screenshots/chat.png" width="2880" height="1800" alt="hrns on macOS: the session list grouped by project with costs, and a chat showing grouped steps, file edits and a formatted answer." /></div>
+    <div class="frame reveal"><img src="screenshots/chat.png" width="2880" height="1800" alt="hrns on macOS: the session list grouped by project with costs, and a chat showing grouped steps, file edits and a formatted answer." /></div>
     <figcaption>fig. 1 · a finished turn: steps grouped, edits counted, answer rendered</figcaption>
   </figure>
 </section>
 
 <section class="col section" id="features" aria-labelledby="features-h">
-  <div class="head">
+  <div class="head reveal">
     <span class="mono-label">FEATURES</span>
     <div>
       <h2 id="features-h">Everything Codex can do, in a window you'll keep open.</h2>
@@ -296,13 +350,13 @@ footer .legal { margin-left: auto; }
   </div>
 
   <div class="man">
-    <div class="flag"><code>--your-plan</code><h3>Runs on your ChatGPT subscription</h3><p>Sign in with ChatGPT, the way the Codex CLI does. Your plan pays for the work, so there's no API key and no per-token bill.</p></div>
-    <div class="flag"><code>--real-agent</code><h3>The actual Codex agent</h3><p>Same agent instructions, plus your <code>config.toml</code>, MCP servers, skills and <code>AGENTS.md</code>.</p></div>
-    <div class="flag"><code>--sandbox</code><h3>Read only, Auto or Full access</h3><p>Every chat runs in a project folder. Auto edits and runs commands inside it and asks before going further.</p></div>
-    <div class="flag"><code>--approve</code><h3>Approvals where you're looking</h3><p>Requests appear in the chat with Approve, Approve for this chat and Deny. <kbd>⌘</kbd> <kbd>↵</kbd> approves.</p></div>
-    <div class="flag"><code>--accounts</code><h3>Several ChatGPT accounts</h3><p>Pick an account per chat and run them side by side. Each one shows its 5-hour and weekly limits.</p></div>
-    <div class="flag"><code>--usage</code><h3>A ledger of every token</h3><p>Daily cost and tokens by account, model and day, priced from models.dev. It includes your Codex CLI, IDE and app sessions.</p></div>
-    <div class="flag"><code>--remote</code><h3>Your phone as a remote</h3><p>Follow chats live, send prompts, stop a turn and approve commands from a phone app, over Tailscale only.</p></div>
+    <div class="flag reveal"><code>--your-plan</code><h3>Runs on your ChatGPT subscription</h3><p>Sign in with ChatGPT, the way the Codex CLI does. Your plan pays for the work, so there's no API key and no per-token bill.</p></div>
+    <div class="flag reveal"><code>--real-agent</code><h3>The actual Codex agent</h3><p>Same agent instructions, plus your <code>config.toml</code>, MCP servers, skills and <code>AGENTS.md</code>.</p></div>
+    <div class="flag reveal"><code>--sandbox</code><h3>Read only, Auto or Full access</h3><p>Every chat runs in a project folder. Auto edits and runs commands inside it and asks before going further.</p></div>
+    <div class="flag reveal"><code>--approve</code><h3>Approvals where you're looking</h3><p>Requests appear in the chat with Approve, Approve for this chat and Deny. <kbd>⌘</kbd> <kbd>↵</kbd> approves.</p></div>
+    <div class="flag reveal"><code>--accounts</code><h3>Several ChatGPT accounts</h3><p>Pick an account per chat and run them side by side. Each one shows its 5-hour and weekly limits.</p></div>
+    <div class="flag reveal"><code>--usage</code><h3>A ledger of every token</h3><p>Daily cost and tokens by account, model and day, priced from models.dev. It includes your Codex CLI, IDE and app sessions.</p></div>
+    <div class="flag reveal"><code>--remote</code><h3>Your phone as a remote</h3><p>Follow chats live, send prompts, stop a turn and approve commands from a phone app, over Tailscale only.</p></div>
   </div>
 
   <div class="figs">
@@ -316,7 +370,7 @@ footer .legal { margin-left: auto; }
           <li><b>A sidebar with context.</b> Status, preview, model, lines changed, tokens and cost on every chat.</li>
         </ul>
       </div>
-      <div class="frame"><img loading="lazy" src="screenshots/home.png" width="2880" height="1800" alt="The new-chat screen: project and git branch, the composer with model and permission controls, suggestions and recent chats." /></div>
+      <div class="frame reveal"><img loading="lazy" src="screenshots/home.png" width="2880" height="1800" alt="The new-chat screen: project and git branch, the composer with model and permission controls, suggestions and recent chats." /></div>
     </div>
 
     <div class="fig rev" id="usage">
@@ -329,7 +383,7 @@ footer .legal { margin-left: auto; }
           <li><b>Prices from models.dev</b>, downloaded once and kept on your Mac.</li>
         </ul>
       </div>
-      <div class="frame"><img loading="lazy" src="screenshots/usage.png" width="2880" height="1920" alt="The usage page: raw token cost, cost by source, a daily stacked bar chart, totals and a per-model table." /></div>
+      <div class="frame reveal"><img loading="lazy" src="screenshots/usage.png" width="2880" height="1920" alt="The usage page: raw token cost, cost by source, a daily stacked bar chart, totals and a per-model table." /></div>
     </div>
 
     <div class="fig">
@@ -337,22 +391,22 @@ footer .legal { margin-left: auto; }
         <h3>One window, several accounts.</h3>
         <p>Keep work and personal accounts apart, or switch to a second one when the first hits its limit. Each signs in separately and shares the rest of your Codex setup.</p>
       </div>
-      <div class="frame"><img loading="lazy" src="screenshots/accounts.png" width="2880" height="1800" alt="Settings listing two ChatGPT accounts with plan, 5-hour and weekly usage, and an Add account button." /></div>
+      <div class="frame reveal"><img loading="lazy" src="screenshots/accounts.png" width="2880" height="1800" alt="Settings listing two ChatGPT accounts with plan, 5-hour and weekly usage, and an Add account button." /></div>
     </div>
   </div>
 </section>
 
 <section class="band" id="phone" aria-labelledby="phone-h">
   <div class="col">
-    <div class="head">
+    <div class="head reveal">
       <span class="mono-label">PHONE</span>
       <div>
         <h2 id="phone-h">Leave your desk. Keep approving.</h2>
         <p class="intro">Start a long task, walk away, and answer Codex from your phone. The app reaches your Mac over your private Tailscale network and nothing else.</p>
       </div>
     </div>
-    <div class="phones"><img loading="lazy" src="screenshots/mobile.png" width="2800" height="1543" alt="Four phone screens: the chat list, a chat with steps and edits, an approval request, and the usage page." /></div>
-    <div class="notes">
+    <div class="phones reveal"><img loading="lazy" src="screenshots/mobile.png" width="2800" height="1543" alt="Four phone screens: the chat list, a chat with steps and edits, an approval request, and the usage page." /></div>
+    <div class="notes reveal">
       <div><h3>Every chat, live</h3><p>Browse chats by project, watch answers stream in, send follow-ups, stop a turn, or start a new chat in any project.</p></div>
       <div><h3>Approve from the notification</h3><p>"Codex needs approval: <code>npm install</code>". Approve or deny from the notification, and get a ping when a turn finishes.</p></div>
       <div><h3>Paired once, private after</h3><p>Scan a QR code in hrns to pair. The server listens only on your Tailscale address and every request carries your token.</p></div>
@@ -361,7 +415,7 @@ footer .legal { margin-left: auto; }
 </section>
 
 <section class="col section" id="how" aria-labelledby="how-h">
-  <div class="head">
+  <div class="head reveal">
     <span class="mono-label">HOW IT WORKS</span>
     <div>
       <h2 id="how-h">A thin native layer around tools you already trust.</h2>
@@ -369,30 +423,30 @@ footer .legal { margin-left: auto; }
     </div>
   </div>
 
-  <div class="diagram" role="img" aria-label="Diagram: the Svelte interface talks over IPC to the Rust core, which talks over stdio to one codex app-server per account; the phone connects to the Rust core over Tailscale.">
+  <div class="diagram reveal" role="img" aria-label="Diagram: the Svelte interface talks over IPC to the Rust core, which talks over stdio to one codex app-server per account; the phone connects to the Rust core over Tailscale.">
 <pre>  <span class="v">interface</span>                 <span class="v">rust core</span>                         <span class="v">codex app-server</span>
-  Svelte 5 · WebView  ──IPC──▶  engine per account   ──stdio──▶  one per account
+  Svelte 5 · WebView  <span class="flow">──IPC──▶</span>  engine per account   <span class="flow" style="animation-delay:.8s">──stdio──▶</span>  one per account
                                 chat store (JSON)               started on first use
   <span class="v">phone</span>                         usage ledger                    stopped after 10 min idle
-  Expo app  ──Tailscale + token──▶ remote API (off by default)</pre>
+  Expo app  <span class="flow" style="animation-delay:1.6s">──Tailscale + token──▶</span> remote API (off by default)</pre>
   </div>
 
   <div class="readout" aria-label="Measurements">
-    <div><span>background polling</span><b>none, event-driven</b></div>
-    <div><span>Codex process after last activity</span><b>exits at 10 min</b></div>
-    <div><span>first scan of 603 MB of Codex history</span><b>1.0 s</b></div>
-    <div><span>every scan after that</span><b>14 ms</b></div>
-    <div><span>chat history written to disk</span><b>once per turn</b></div>
+    <div><span>background polling</span><span class="bar" aria-hidden="true"></span><b>none, event-driven</b></div>
+    <div><span>Codex process after last activity</span><span class="bar" aria-hidden="true"></span><b>exits at 10 min</b></div>
+    <div><span>first scan of 603 MB of Codex history</span><span class="bar" aria-hidden="true"><i style="width:100%"></i></span><b>1.0 s</b></div>
+    <div><span>every scan after that</span><span class="bar" aria-hidden="true"><i style="width:1.4%;min-width:3px"></i></span><b>14 ms</b></div>
+    <div><span>chat history written to disk</span><span class="bar" aria-hidden="true"></span><b>once per turn</b></div>
   </div>
 
-  <div class="two">
+  <div class="two reveal">
     <div><h3>Light on your battery</h3><p>Nothing polls. Codex runs only while you use it. Streaming text repaints at most every 60 ms. If <code>codex</code> is the npm wrapper, hrns starts the native binary directly, so no Node.js process idles in the background.</p></div>
     <div><h3>Your data stays on your Mac</h3><p>Chats, usage and prices live in <code>~/Library/Application Support/dev.hrns.app</code>. hrns makes one request of its own, a price download. Codex handles the connection to OpenAI.</p></div>
   </div>
 </section>
 
 <section class="col section" id="install" aria-labelledby="install-h">
-  <div class="head">
+  <div class="head reveal">
     <span class="mono-label">INSTALL</span>
     <div>
       <h2 id="install-h">Build it in a few minutes.</h2>
@@ -434,7 +488,7 @@ footer .legal { margin-left: auto; }
 </section>
 
 <section class="col section" id="faq" aria-labelledby="faq-h">
-  <div class="head">
+  <div class="head reveal">
     <span class="mono-label">FAQ</span>
     <h2 id="faq-h">Questions people ask first.</h2>
   </div>
@@ -471,28 +525,93 @@ footer .legal { margin-left: auto; }
 </footer>
 
 <script>
-  // Hero: finish the session when the visitor approves or denies.
-  const ask = document.getElementById("ask");
+  // Hero: replay the session as it would stream, then wait for Approve / Deny.
+  // The HTML already holds the finished state, so no-JS and reduced-motion visitors see it complete.
   const log = document.getElementById("log");
-  function resolve(approved) {
-    const lines = approved
-      ? [["step", '<b>Ran</b> bun run check <span class="d">· 3.4s</span> <span class="ok">✓ 0 errors</span>'],
-         ["answer", "Added a <b>Theme</b> setting: System, Light or Dark. It's stored per device and applied before first paint, so there's no flash."]]
-      : [["step", '<span class="no">Denied</span> bun run check'],
-         ["answer", "Understood. The edits are in place but unchecked. Run <code>bun run check</code> when you're ready."]];
-    ask.remove();
-    for (const [cls, html] of lines) {
-      const div = document.createElement("div");
-      div.className = cls;
-      div.innerHTML = html;
-      log.append(div);
-    }
+  const replayBtn = document.getElementById("replay");
+  const initial = log.innerHTML;
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let run = 0;
+
+  function line(cls, html) {
+    const div = document.createElement("div");
+    div.className = cls;
+    div.innerHTML = html;
+    log.append(div);
+    return div;
   }
-  document.getElementById("approve").addEventListener("click", () => resolve(true));
-  document.getElementById("deny").addEventListener("click", () => resolve(false));
+
+  async function count(el, to) {
+    for (let n = 0; n <= to; n++) { el.textContent = (el.classList.contains("ok") ? "+" : "−") + n; await wait(70); }
+  }
+
+  async function play() {
+    const id = ++run;
+    replayBtn.hidden = true;
+    log.innerHTML = "";
+    const you = line("you", '<span class="t"></span><span class="caret"></span>');
+    const text = "Add a dark mode toggle to settings. Follow the system by default.";
+    for (let i = 1; i <= text.length; i++) {
+      if (id !== run) return;
+      you.querySelector(".t").textContent = text.slice(0, i);
+      await wait(22);
+    }
+    you.querySelector(".caret").remove();
+    await wait(350);
+    const exp = line("step", '<span class="spin"></span><span class="shimmer">Exploring…</span>');
+    await wait(1100);
+    if (id !== run) return;
+    exp.innerHTML = '<b>Explored</b> 2 files, 1 search <span class="d">· 0.4s</span>';
+    for (const [file, add, del] of [["src/lib/Settings.svelte", 6, 1], ["src/app.css", 4, 0]]) {
+      await wait(450);
+      if (id !== run) return;
+      const row = line("step", `<b>Edited</b> ${file} <span class="ok">+0</span> <span class="no">−0</span>`);
+      await Promise.all([count(row.querySelector(".ok"), add), count(row.querySelector(".no"), del)]);
+    }
+    await wait(500);
+    if (id !== run) return;
+    const ask = line("ask pulse", `<p><b>Allow Codex to run this command?</b> It needs to run outside the sandbox.</p>
+      <code>$ bun run check</code>
+      <div class="row"><button class="go" type="button" data-a="1">Approve<kbd>⌘↵</kbd></button><button type="button" data-a="0">Deny</button></div>`);
+    ask.id = "ask";
+    ask.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => resolve(b.dataset.a === "1")));
+  }
+
+  async function resolve(approved) {
+    const ask = document.getElementById("ask");
+    if (!ask) return;
+    const id = run;
+    ask.remove();
+    if (approved && !still) {
+      const r = line("step", '<span class="spin"></span><span class="shimmer">Running bun run check…</span>');
+      await wait(1200);
+      if (id !== run) return;
+      r.innerHTML = '<b>Ran</b> bun run check <span class="d">· 3.4s</span> <span class="ok">✓ 0 errors</span>';
+    } else if (approved) {
+      line("step", '<b>Ran</b> bun run check <span class="d">· 3.4s</span> <span class="ok">✓ 0 errors</span>');
+    } else {
+      line("step", '<span class="no">Denied</span> bun run check');
+    }
+    line("answer", approved
+      ? "Added a <b>Theme</b> setting: System, Light or Dark. It's stored per device and applied before first paint, so there's no flash."
+      : "Understood. The edits are in place but unchecked. Run <code>bun run check</code> when you're ready.");
+    replayBtn.hidden = false;
+  }
+
+  // Static first state (complete), wired for clicks.
+  function wireStatic() {
+    log.innerHTML = initial;
+    document.getElementById("approve").addEventListener("click", () => resolve(true));
+    document.getElementById("deny").addEventListener("click", () => resolve(false));
+  }
+
+  replayBtn.addEventListener("click", () => (still ? (wireStatic(), (replayBtn.hidden = true)) : play()));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && document.getElementById("ask")) resolve(true);
   });
+  if (still) wireStatic();
+  else setTimeout(play, 700);
 
   // Copy buttons: copy the commands without prompts or comments.
   for (const btn of document.querySelectorAll(".copy")) {
