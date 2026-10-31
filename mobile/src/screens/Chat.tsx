@@ -13,9 +13,9 @@ const newId = () =>
     return (ch === "x" ? r : (r & 0x3) | 0x8).toString(16);
   });
 
-type Props = { client: Client; threadId: string | null; cwd: string | null; prefs: Prefs; onBack: () => void; onChanges: (cwd: string) => void };
+type Props = { client: Client; threadId: string | null; cwd: string | null; prefs: Prefs; onBack: () => void; onChanges: (cwd: string) => void; onTerminal: (cwd: string) => void };
 
-export function Chat({ client, threadId, cwd, prefs, onBack, onChanges }: Props) {
+export function Chat({ client, threadId, cwd, prefs, onBack, onChanges, onTerminal }: Props) {
   // A new chat gets its id up front so streamed events can be matched immediately.
   const [id] = useState(threadId ?? newId());
   const [thread, setThread] = useState<Thread | null>(null);
@@ -167,6 +167,11 @@ export function Chat({ client, threadId, cwd, prefs, onBack, onChanges }: Props)
             {access ? <Text style={access === "full" ? { color: c.accent, fontWeight: "600" } : undefined}>{access === "full" ? "Full access" : access === "read-only" ? "Read only" : "Auto"}</Text> : null}
           </Text>
         </View>
+        {folder && (
+          <Pressable style={({ pressed }) => [styles.termBtn, pressed && { backgroundColor: c.hover }]} onPress={() => onTerminal(folder)} hitSlop={6} accessibilityLabel="Open a terminal in this project">
+            <Icon name="terminal" size={18} color={c.muted} />
+          </Pressable>
+        )}
         {folder && git && git.files.length > 0 && (
           <Pressable style={({ pressed }) => [styles.changes, pressed && { backgroundColor: c.hover }]} onPress={() => onChanges(folder)} hitSlop={6} accessibilityLabel={`${git.files.length} uncommitted files`}>
             <Icon name="branch" size={14} color={c.muted} />
@@ -370,6 +375,7 @@ const md = themed(() => ({
 const styles = sheet(() => ({
   wrap: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.border },
+  termBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
   changes: { flexDirection: "row", alignItems: "center", gap: 5, height: 30, paddingHorizontal: 10, borderRadius: 15, borderWidth: 1, borderColor: c.border },
   changesNum: { fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] },
   back: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },

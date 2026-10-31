@@ -31,6 +31,7 @@ export type Prefs = { model?: string; effort?: string; access?: "read-only" | "a
 export type Project = { path: string; modified: number };
 export type ProjectIcon = { image: string | null; tech: string | null };
 export type GitFile = { path: string; old: string | null; kind: "add" | "delete" | "rename" | "update"; add: number; del: number; binary: boolean; untracked: boolean };
+export type TermInfo = { id: string; cwd: string; title: string; alive: boolean; createdAt: number };
 export type GitStatus = { root: string; rev: string; files: GitFile[]; add: number; del: number };
 
 export type ChatEvent =
@@ -45,6 +46,7 @@ export type ServerEvent =
   | { type: "chat"; payload: ChatEvent }
   | { type: "notify"; payload: { title: string; body: string; threadId?: string } }
   | { type: "thread-title"; payload: { threadId: string; title: string } }
+  | { type: "terminals"; payload: TermInfo[] }
   | { type: "resync" }
   | { type: "connection"; connected: boolean };
 
@@ -108,6 +110,15 @@ export class Client {
     ).then((r) => r.diff);
   title = (threadId: string, model: string, effort: string | null) =>
     this.req<{ title: string }>("/api/title", { method: "POST", body: JSON.stringify({ threadId, model, effort }) }, 60000).then((r) => r.title);
+  terminals = () => this.req<TermInfo[]>("/api/terminals");
+  openTerminal = (cwd: string | null) => this.req<TermInfo>("/api/terminals", { method: "POST", body: JSON.stringify({ cwd }) });
+  closeTerminal = (id: string) => this.req(`/api/terminals/${encodeURIComponent(id)}`, { method: "DELETE" });
+  /** The xterm page the Mac serves for one session, themed to match the app. */
+  terminalPage = (id: string, o: { scheme: string; bg: string; fg: string; accent: string; size: number }) =>
+    `${this.server.url}/api/terminal.html?` +
+    [["id", id], ["token", this.server.token], ["scheme", o.scheme], ["bg", o.bg.slice(1)], ["fg", o.fg.slice(1)], ["accent", o.accent.slice(1)], ["size", String(o.size)]]
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+      .join("&");
   approve = (key: string, decision: "accept" | "acceptForSession" | "decline") =>
     this.req("/api/approval", { method: "POST", body: JSON.stringify({ key, decision }) });
 

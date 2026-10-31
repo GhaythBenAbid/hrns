@@ -10,6 +10,8 @@
   import AnimatedTitle from "./lib/AnimatedTitle.svelte";
   import DiffButton from "./lib/DiffButton.svelte";
   import DiffSidebar from "./lib/DiffSidebar.svelte";
+  import TerminalPanel from "./lib/TerminalPanel.svelte";
+  import { terms } from "./lib/terminal.svelte";
   import { refreshDiff, watchDiffs } from "./lib/gitdiff.svelte";
   import Settings from "./lib/Settings.svelte";
   import Usage from "./lib/Usage.svelte";
@@ -89,7 +91,14 @@
 
   onMount(() => {
     app.init();
+    terms.init();
   });
+
+  const paneDir = () => (app.pane.current ? app.pane.current.cwd : app.folder);
+  function toggleTerminal() {
+    if (terms.open) terms.setOpen(false);
+    else terms.show(paneDir());
+  }
 
   // Uncommitted changes of every project on screen, for the header's +/− button.
   const shownDirs = () => app.panes.map((p) => (p.current ? p.current.cwd : app.folder));
@@ -108,6 +117,7 @@
     if (mod && e.key === "n") { e.preventDefault(); app.newChat(); focusComposer(); }
     else if (mod && e.key === "o" && !app.finder) { e.preventDefault(); app.pickFolder().then((dir) => { if (dir) { app.newChatIn(dir); focusComposer(); } }); }
     else if (mod && e.key === "b") { e.preventDefault(); toggleSidebar(); }
+    else if (mod && (e.key === "j" || e.key === "`")) { e.preventDefault(); toggleTerminal(); }
     else if (mod && e.key === ",") { e.preventDefault(); app.view = app.view === "settings" ? "chat" : "settings"; }
     else if (mod && e.key === "w" && app.panes.length > 1) { e.preventDefault(); app.closePane(app.pane); }
     else if (e.key === "Escape" && app.view !== "chat") app.view = "chat";
@@ -148,7 +158,13 @@
     <header data-tauri-drag-region class:inset={!sidebarShown}>
       <div class="title" data-tauri-drag-region>{#if app.view === "settings"}Settings{:else if app.view === "chat" && app.panes.length === 1}<AnimatedTitle text={app.current?.title ?? ""} id={app.current?.id} />{/if}</div>
       {#if app.view === "chat" && app.panes.length === 1 && app.ready && app.account}
-        <div class="header-actions"><DiffButton pane={app.panes[0]} /></div>
+        <div class="header-actions">
+          <button class="icon-btn term-btn" class:on={terms.open} title="{terms.open ? 'Hide' : 'Show'} terminal (⌘J)" aria-label="Terminal" aria-pressed={terms.open} onclick={toggleTerminal}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 10 3 2-3 2M13 15h4" /></svg>
+            {#if terms.list.length}<span class="badge">{terms.list.length}</span>{/if}
+          </button>
+          <DiffButton pane={app.panes[0]} />
+        </div>
       {/if}
     </header>
 
@@ -168,6 +184,7 @@
         </div>
       </div>
     {:else}
+      <div class="stack">
       <div class="work">
         <div class="panes">
           {#each app.panes as pane, i (pane)}
@@ -183,6 +200,10 @@
         {#if app.diffOpen}
           <DiffSidebar dir={app.pane.current ? app.pane.current.cwd : app.folder} />
         {/if}
+      </div>
+      {#if terms.open}
+        <TerminalPanel cwd={paneDir()} />
+      {/if}
       </div>
     {/if}
 
@@ -233,7 +254,14 @@
   .title { flex: 1; text-align: center; font-size: 13px; font-weight: 550; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 60px; }
   header.inset .title { padding-left: 0; margin-left: -140px; }
 
+  .stack { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .work { flex: 1; min-height: 0; display: flex; }
+  .term-btn { position: relative; width: 30px; height: 30px; }
+  .term-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .badge {
+    position: absolute; top: 2px; right: 1px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px;
+    font-size: 9px; font-weight: 700; line-height: 13px; text-align: center; color: var(--accent-ink); background: var(--accent);
+  }
   .panes { flex: 1; min-width: 0; min-height: 0; display: flex; }
   .slot { min-width: 0; display: flex; }
   .divider {

@@ -119,6 +119,10 @@ impl Remote {
             .route("/api/git/status", get(git_status))
             .route("/api/git/diff", get(git_diff))
             .route("/api/title", post(title))
+            .route("/api/terminals", get(terminals).post(terminal_open))
+            .route("/api/terminals/{id}", axum::routing::delete(terminal_close))
+            .route("/api/terminals/{id}/ws", get(terminal_ws))
+            .route("/api/terminal.html", get(terminal_page))
             .layer(middleware::from_fn_with_state(ctx.clone(), auth))
             .with_state(ctx);
 
@@ -477,5 +481,95 @@ async fn title(State(ctx): State<Ctx>, Json(b): Json<TitleBody>) -> Response {
     match engine.generate_title(b.thread_id, first, b.model, b.effort).await {
         Ok(title) => Json(json!({ "title": title })).into_response(),
         Err(e) => err(e),
+    }
+}
+
+// ---------- terminal (shared with the desktop panel) ----------
+
+fn terms(ctx: &Ctx) -> Arc<crate::terminal::Terminals> {
+    ctx.remote.app.state::<Arc<crate::terminal::Terminals>>().inner().clone()
+}
+
+async fn terminals(State(ctx): State<Ctx>) -> Json<Value> {
+    Json(json!(terms(&ctx).list()))
+}
+
+#[derive(Deserialize)]
+struct OpenBody {
+    cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+}
+
+async fn terminal_open(State(ctx): State<Ctx>, Json(b): Json<OpenBody>) -> Response {
+    match terms(&ctx).open(b.cwd, b.cols.unwrap_or(48), b.rows.unwrap_or(30)) {
+        Ok(info) => Json(json!(info)).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+async fn terminal_close(State(ctx): State<Ctx>, Path(id): Path<String>) -> Json<Value> {
+    terms(&ctx).close(&id);
+    Json(json!({ "ok": true }))
+}
+
+/// The phone's terminal view: xterm.js in a WebView, talking to `/ws` below.
+async fn terminal_page() -> Response {
+    static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let page = PAGE.get_or_init(|| {
+        include_str!("assets/terminal.html")
+            .replace("/*XTERM_CSS*/", include_str!("../../node_modules/@xterm/xterm/css/xterm.css"))
+            .replace("/*XTERM_JS*/", include_str!("../../node_modules/@xterm/xterm/lib/xterm.js"))
+            .replace("/*FIT_JS*/", include_str!("../../node_modules/@xterm/addon-fit/lib/addon-fit.js"))
+    });
+    ([(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"), (axum::http::header::CACHE_CONTROL, "no-store")], page.clone()).into_response()
+}
+
+async fn terminal_ws(State(ctx): State<Ctx>, Path(id): Path<String>, ws: WebSocketUpgrade) -> Response {
+    let terms = terms(&ctx);
+    ws.on_upgrade(move |socket| terminal_pump(socket, terms, id))
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum TermIn {
+    Input { data: String },
+    Resize { cols: u16, rows: u16 },
+}
+
+async fn terminal_pump(mut socket: WebSocket, terms: Arc<crate::terminal::Terminals>, id: String) {
+    use crate::terminal::Out;
+    let Ok((scrollback, alive, mut rx)) = terms.attach(&id) else {
+        let _ = socket.send(Message::Text(json!({ "type": "gone" }).to_string().into())).await;
+        return;
+    };
+    let size = terms.size(&id).unwrap_or((80, 24));
+    if socket.send(Message::Text(json!({ "type": "init", "data": scrollback, "alive": alive, "cols": size.0, "rows": size.1 }).to_string().into())).await.is_err() {
+        return;
+    }
+    loop {
+        tokio::select! {
+            out = rx.recv() => match out {
+                Ok(Out::Data(d)) => if socket.send(Message::Text(json!({ "type": "data", "data": d }).to_string().into())).await.is_err() { break },
+                Ok(Out::Size(cols, rows)) => if socket.send(Message::Text(json!({ "type": "size", "cols": cols, "rows": rows }).to_string().into())).await.is_err() { break },
+                Ok(Out::Exit) => { let _ = socket.send(Message::Text(json!({ "type": "exit" }).to_string().into())).await; }
+                // Fell behind: start over from the scrollback rather than show a hole.
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let Ok((sb, alive, fresh)) = terms.attach(&id) else { break };
+                    rx = fresh;
+                    if socket.send(Message::Text(json!({ "type": "init", "data": sb, "alive": alive }).to_string().into())).await.is_err() { break }
+                }
+                Err(_) => { let _ = socket.send(Message::Text(json!({ "type": "gone" }).to_string().into())).await; break }
+            },
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Text(t))) => match serde_json::from_str::<TermIn>(&t) {
+                    Ok(TermIn::Input { data }) => { let _ = terms.write(&id, &data); }
+                    Ok(TermIn::Resize { cols, rows }) => { let _ = terms.resize(&id, cols, rows); }
+                    Err(_) => {}
+                },
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                _ => {}
+            },
+        }
     }
 }

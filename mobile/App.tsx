@@ -16,13 +16,15 @@ import { Chat } from "./src/screens/Chat";
 import { Chats } from "./src/screens/Chats";
 import { Pair } from "./src/screens/Pair";
 import { Settings } from "./src/screens/Settings";
+import { Terminal } from "./src/screens/Terminal";
+import { Terminals } from "./src/screens/Terminals";
 import { Usage } from "./src/screens/Usage";
 import { applyTheme, c, sheet, type Appearance } from "./src/theme";
 
 const KEY = "hrns.server";
 
-type Tab = "chats" | "usage" | "settings";
-type Route = { name: "list" } | { name: "chat"; id: string | null; cwd: string | null } | { name: "changes"; cwd: string; from: Route };
+type Tab = "chats" | "terminal" | "usage" | "settings";
+type Route = { name: "list" } | { name: "chat"; id: string | null; cwd: string | null } | { name: "changes"; cwd: string; from: Route } | { name: "terminal"; id: string; from: Route };
 
 export default function App() {
   const [server, setServer] = useState<Server | null | undefined>(demoScene ? DEMO_SERVER : undefined);
@@ -131,7 +133,7 @@ export default function App() {
 
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (route.name === "changes") {
+      if (route.name === "changes" || route.name === "terminal") {
         setRoute(route.from);
         return true;
       }
@@ -156,6 +158,15 @@ export default function App() {
     setTab("chats");
   }
 
+  // A fresh shell in the chat's project, straight from the chat header.
+  async function terminalIn(cwd: string) {
+    if (!client) return;
+    try {
+      const t = await client.openTerminal(cwd);
+      setRoute((r) => ({ name: "terminal", id: t.id, from: r }));
+    } catch {}
+  }
+
   const accountLabel = (id: string) => accounts.find((a) => a.id === id)?.email ?? id;
 
   return (
@@ -167,13 +178,17 @@ export default function App() {
         ) : !server || !client ? (
           <Pair onPaired={pair} />
         ) : route.name === "chat" ? (
-          <Chat key={route.id ?? "new"} client={client} threadId={route.id} cwd={route.cwd} prefs={prefs} onBack={() => setRoute({ name: "list" })} onChanges={(cwd) => setRoute({ name: "changes", cwd, from: route })} />
+          <Chat key={route.id ?? "new"} client={client} threadId={route.id} cwd={route.cwd} prefs={prefs} onBack={() => setRoute({ name: "list" })} onChanges={(cwd) => setRoute({ name: "changes", cwd, from: route })} onTerminal={terminalIn} />
+        ) : route.name === "terminal" ? (
+          <Terminal key={route.id} client={client} id={route.id} onBack={() => setRoute(route.from)} onReplace={(id) => setRoute({ ...route, id })} />
         ) : route.name === "changes" ? (
           <Changes client={client} cwd={route.cwd} onBack={() => setRoute(route.from)} />
         ) : (
           <View style={{ flex: 1 }}>
             <View style={{ flex: 1 }}>
-              {tab === "usage" ? (
+              {tab === "terminal" ? (
+                <Terminals client={client} refreshKey={refreshKey} onOpen={(id) => setRoute({ name: "terminal", id, from: { name: "list" } })} />
+              ) : tab === "usage" ? (
                 <Usage client={client} accountLabel={accountLabel} />
               ) : tab === "settings" ? (
                 <Settings client={client} host={host} connected={connected} prefs={prefs} onPrefs={setPrefs} look={look} onLook={updateLook} onUnpair={unpair} />
@@ -200,6 +215,7 @@ export default function App() {
 
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "chats", label: "Chats", icon: "chat" },
+  { id: "terminal", label: "Terminal", icon: "terminal" },
   { id: "usage", label: "Usage", icon: "usage" },
   { id: "settings", label: "Settings", icon: "settings" },
 ];
