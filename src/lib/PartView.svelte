@@ -1,28 +1,13 @@
 <script lang="ts">
   import { render } from "./markdown";
   import type { Part } from "./store.svelte";
+  import { diffLines, stat } from "./diff";
 
   let { part, live = false }: { part: Part; live?: boolean } = $props();
 
   const html = $derived(part.type === "text" && part.text ? render(part.text) : "");
   const running = $derived("status" in part && part.status === "inProgress");
 
-  // Codex sends unified diffs for edits, but the raw file contents for adds/deletes.
-  function diffLines(c: { kind: string; diff: string }): string[] {
-    const lines = c.diff.replace(/\n$/, "").split("\n");
-    if (c.kind === "add") return lines.map((l) => "+" + l);
-    if (c.kind === "delete") return lines.map((l) => "-" + l);
-    return lines;
-  }
-
-  function stat(lines: string[]) {
-    let add = 0, del = 0;
-    for (const l of lines) {
-      if (l.startsWith("+") && !l.startsWith("+++")) add++;
-      else if (l.startsWith("-") && !l.startsWith("---")) del++;
-    }
-    return { add, del };
-  }
   const base = (p: string) => p.split("/").pop() ?? p;
 </script>
 

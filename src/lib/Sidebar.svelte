@@ -1,5 +1,8 @@
 <script lang="ts">
   import { app, type Summary } from "./store.svelte";
+  import { drag, startDrag } from "./drag.svelte";
+  import ProjectIcon from "./ProjectIcon.svelte";
+  import AnimatedTitle from "./AnimatedTitle.svelte";
 
   let query = $state("");
   let search: HTMLInputElement;
@@ -77,6 +80,9 @@
     }
   }
 
+  const p5 = $derived(app.rateLimits?.primary);
+  const pw = $derived(app.rateLimits?.secondary);
+
   function pct(w: { usedPercent: number } | null | undefined) {
     return Math.max(0, Math.min(100, Math.round(w?.usedPercent ?? 0)));
   }
@@ -121,6 +127,7 @@
       <div class="project">
         <button class="phead" title={p.dir || "No project"} onclick={() => (collapsed[p.dir] = !collapsed[p.dir])}>
           <svg class="chev" class:closed={collapsed[p.dir]} width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
+          {#if p.dir}<ProjectIcon path={p.dir} size={16} />{/if}
           <span class="pname">{name(p.dir)}</span>
           <span class="count">{p.items.length}</span>
         </button>
@@ -135,8 +142,8 @@
         {#each p.items as t (t.id)}
           {@const st = status(t)}
           {@const u = app.usageOf(t)}
-          <div class="card" class:active={app.current?.id === t.id}>
-            <button class="open" onclick={() => app.open(t.id)}>
+          <div class="card" class:active={app.isOpen(t.id)} class:lifted={drag.id === t.id}>
+            <button class="open" title="Drag into the chat to open side by side" onclick={() => app.open(t.id)} onpointerdown={(e) => startDrag(e, t.id, t.title)}>
               <div class="row1">
                 <span class="status {st}" title={st === "waiting" ? "Needs your approval" : st === "running" ? "Working" : st === "failed" ? "Last turn failed" : ""}>
                   {#if st === "waiting"}
@@ -149,7 +156,7 @@
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" /></svg>
                   {/if}
                 </span>
-                <span class="title">{t.title}</span>
+                <span class="title"><AnimatedTitle text={t.title} id={t.id} /></span>
                 <span class="ago">{ago(t.updatedAt)}</span>
               </div>
 
@@ -223,38 +230,34 @@
         </div>
       {/if}
 
-      <button class="nav-row" class:on={app.view === "usage"} onclick={() => (app.view = app.view === "usage" ? "chat" : "usage")}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 20V12M12 20V5M19 20v-9" /></svg>
-        Usage
-      </button>
-
       <div class="who">
-        <button class="who-btn" class:on={accountMenu} title="Switch account" onclick={(e) => { e.stopPropagation(); accountMenu = !accountMenu; if (accountMenu) app.accounts.forEach((a) => a.email && !app.statuses[a.id] && app.refreshStatus(a.id)); }}>
+        <button class="who-btn" class:on={accountMenu} title="{app.account?.email ?? 'Account'} · ChatGPT {app.account?.planType ?? ''}" onclick={(e) => { e.stopPropagation(); accountMenu = !accountMenu; if (accountMenu) app.accounts.forEach((a) => a.email && !app.statuses[a.id] && app.refreshStatus(a.id)); }}>
           <div class="avatar">{(app.account?.email ?? "?")[0].toUpperCase()}</div>
-          <div class="who-meta">
-            <div class="email">{app.account?.email ?? "Signed in"}</div>
-            <div class="plan">ChatGPT {app.account?.planType ?? ""}{#if app.accounts.length > 1} · {app.accounts.length} accounts{/if}</div>
-          </div>
-          <svg class="updown" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5M7 9l5-5 5 5" /></svg>
+          <span class="email">{app.account?.email?.split("@")[0] ?? "Signed in"}</span>
+          <svg class="updown" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5M7 9l5-5 5 5" /></svg>
         </button>
+
+        <!-- Usage at a glance: outer ring = short window, inner ring = weekly. Opens the Usage page. -->
+        <button
+          class="meter"
+          class:on={app.view === "usage"}
+          class:hot={pct(p5) > 80 || pct(pw) > 80}
+          title={[p5 && `${windowLabel(p5.windowDurationMins, "5h")}: ${pct(p5)}% used`, pw && `${windowLabel(pw.windowDurationMins, "Week")}: ${pct(pw)}% used`].filter(Boolean).join(" · ") || "Usage"}
+          onclick={() => (app.view = app.view === "usage" ? "chat" : "usage")}
+        >
+          <svg width="18" height="18" viewBox="0 0 36 36" aria-hidden="true">
+            <circle class="track" cx="18" cy="18" r="15" />
+            <circle class="fill" cx="18" cy="18" r="15" pathLength="100" stroke-dasharray="{pct(p5)} 100" />
+            <circle class="track" cx="18" cy="18" r="9.5" />
+            <circle class="fill week" cx="18" cy="18" r="9.5" pathLength="100" stroke-dasharray="{pct(pw)} 100" />
+          </svg>
+          {#if p5}<span>{pct(p5)}%</span>{/if}
+        </button>
+
         <button class="icon-btn" class:on={app.view === "settings"} title="Settings (⌘,)" onclick={() => app.openSettings()}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" /></svg>
         </button>
       </div>
-      {#if app.rateLimits}
-        <div class="limits">
-          {#each [["primary", "5h"], ["secondary", "Week"]] as [key, fb]}
-            {@const w = app.rateLimits[key as "primary" | "secondary"]}
-            {#if w}
-              <div class="limit" title="{pct(w)}% of {windowLabel(w.windowDurationMins, fb)} limit used">
-                <span>{windowLabel(w.windowDurationMins, fb)}</span>
-                <div class="bar"><div style="width:{pct(w)}%" class:hot={pct(w) > 80}></div></div>
-                <span class="num">{pct(w)}%</span>
-              </div>
-            {/if}
-          {/each}
-        </div>
-      {/if}
     </footer>
   {/if}
   {#if stats && statsFor}
@@ -326,6 +329,7 @@
     font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint);
   }
   .phead:hover { color: var(--muted); }
+  .phead :global(.pi) { margin: -2px 1px -2px 0; }
   .pname { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .count {
     font-size: 10.5px; font-weight: 600; letter-spacing: 0; padding: 0 6px; border-radius: 999px;
@@ -340,6 +344,7 @@
   .card { position: relative; border-radius: 10px; margin-bottom: 2px; border: 1px solid transparent; }
   .card:hover { background: var(--hover); }
   .card.active { background: var(--raised); border-color: var(--border); }
+  .card.lifted { opacity: 0.45; }
   .card.active::before {
     content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--accent);
   }
@@ -415,13 +420,8 @@
   .cta { padding: 8px 14px; border-radius: 9px; border: 1px solid var(--border); color: var(--text); font-size: 13px; }
   .cta:hover { background: var(--hover); }
 
-  footer { position: relative; border-top: 1px solid var(--border); padding: 8px 10px 12px; }
-  .nav-row {
-    width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
-    border-radius: 9px; font-size: 13.5px; color: var(--muted);
-  }
-  .nav-row:hover, .nav-row.on { background: var(--hover); color: var(--text); }
-  .who-btn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 9px; text-align: left; }
+  footer { position: relative; border-top: 1px solid var(--border); padding: 6px 8px; }
+  .who-btn { flex: 1; min-width: 0; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 9px; text-align: left; }
   .who-btn:hover, .who-btn.on { background: var(--hover); }
   .updown { flex: none; color: var(--faint); }
   .acct-menu {
@@ -437,19 +437,26 @@
   .avatar.sm { width: 26px; height: 26px; font-size: 11.5px; }
   .avatar.off { background: var(--raised); color: var(--faint); }
   .sep { height: 1px; background: var(--border); margin: 6px 4px; }
-  .who { display: flex; align-items: center; gap: 10px; }
+  .who { display: flex; align-items: center; gap: 2px; }
+  .who .email { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
+  .who-btn:hover .email, .who-btn.on .email { color: var(--text); }
+  .meter {
+    flex: none; height: 30px; padding: 0 7px; border-radius: 8px; display: flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 550; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .meter:hover, .meter.on { background: var(--hover); color: var(--text); }
+  .meter svg { rotate: -90deg; }
+  .meter circle { fill: none; stroke-width: 4; }
+  .meter .track { stroke: var(--raised); }
+  .meter .fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dasharray 0.4s; }
+  .meter .fill.week { stroke: color-mix(in srgb, var(--accent) 55%, var(--muted)); }
+  .meter.hot .fill { stroke: var(--danger); }
   .avatar {
-    width: 28px; height: 28px; border-radius: 50%; flex: none; display: grid; place-items: center;
-    background: var(--accent); color: var(--accent-ink); font-weight: 650; font-size: 12.5px;
+    width: 22px; height: 22px; border-radius: 50%; flex: none; display: grid; place-items: center;
+    background: var(--accent); color: var(--accent-ink); font-weight: 650; font-size: 10.5px;
   }
   .who-meta { flex: 1; min-width: 0; }
   .email { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .icon-btn.on { background: var(--raised); color: var(--text); }
   .plan { font-size: 11px; color: var(--faint); text-transform: capitalize; }
-  .limits { margin-top: 10px; display: grid; gap: 5px; }
-  .limit { display: grid; grid-template-columns: 34px 1fr 30px; align-items: center; gap: 8px; font-size: 10.5px; color: var(--faint); }
-  .bar { height: 3px; border-radius: 3px; background: var(--raised); overflow: hidden; }
-  .bar > div { height: 100%; background: var(--accent); border-radius: 3px; }
-  .bar > div.hot { background: var(--danger); }
-  .num { text-align: right; font-variant-numeric: tabular-nums; }
 </style>

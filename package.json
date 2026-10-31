@@ -16,7 +16,8 @@
     "dompurify": "^3.4.17",
     "highlight.js": "^11.12.0",
     "marked": "^18.1.2",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "simple-icons": "^16.36.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",

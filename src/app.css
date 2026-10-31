@@ -20,25 +20,24 @@
   color-scheme: dark;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #ffffff;
-    --sidebar: #f6f6f7;
-    --panel: #ffffff;
-    --raised: #f2f2f4;
-    --hover: #ececef;
-    --border: #e4e4e8;
-    --text: #18181b;
-    --muted: #6b6b76;
-    --faint: #a1a1aa;
-    --accent: #7c3aed;
-    --accent-ink: #ffffff;
-    --bubble: #f2f2f4;
-    --danger: #dc2626;
-    --danger-bg: #fef2f2;
-    --code-bg: #f7f7f8;
-    color-scheme: light;
-  }
+/* Set by App from the theme setting ("system" follows macOS). */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --sidebar: #f6f6f7;
+  --panel: #ffffff;
+  --raised: #f2f2f4;
+  --hover: #ececef;
+  --border: #e4e4e8;
+  --text: #18181b;
+  --muted: #6b6b76;
+  --faint: #a1a1aa;
+  --accent: #7c3aed;
+  --accent-ink: #ffffff;
+  --bubble: #f2f2f4;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --code-bg: #f7f7f8;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -106,7 +105,7 @@ textarea, input { font: inherit; color: inherit; }
 .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-property { color: #73daca; }
 .hljs-meta, .hljs-tag, .hljs-name { color: #89ddff; }
 .hljs-deletion { color: var(--danger); }
-@media (prefers-color-scheme: light) {
+[data-theme="light"] {
   .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-built_in { color: #8839ef; }
   .hljs-string, .hljs-attr-value, .hljs-addition { color: #40a02b; }
   .hljs-number, .hljs-symbol { color: #d6630e; }

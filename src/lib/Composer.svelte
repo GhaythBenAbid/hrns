@@ -1,13 +1,11 @@
 <script lang="ts">
-  import { app } from "./store.svelte";
+  import { app, type Pane } from "./store.svelte";
+  import ProjectIcon from "./ProjectIcon.svelte";
 
-  let { autofocus = false }: { autofocus?: boolean } = $props();
+  let { pane, autofocus = false }: { pane: Pane; autofocus?: boolean } = $props();
   let text = $state("");
   let box: HTMLTextAreaElement;
-  let menu = $state<"model" | "effort" | "access" | "account" | null>(null);
-  // Existing chats are pinned to their account; new chats use the selected one.
-  const chatAccount = $derived(app.current ? (app.current.account ?? "default") : app.activeAccount);
-  const shortEmail = (e: string) => e.split("@")[0];
+  let menu = $state<"model" | "effort" | "access" | null>(null);
 
   const accessModes = [
     { id: "read-only", label: "Read only", desc: "Codex can read files. Asks before editing or running commands." },
@@ -16,10 +14,10 @@
   ] as const;
   const accessLabel = $derived(accessModes.find((m) => m.id === app.access)?.label ?? "Auto");
   // Existing chats keep their folder; new chats use the selected one.
-  const folder = $derived(app.current ? app.current.cwd : app.folder);
+  const folder = $derived(pane.current ? pane.current.cwd : app.folder);
   const folderName = $derived(folder ? folder.split("/").filter(Boolean).pop() : null);
 
-  const streaming = $derived(!!app.current && !!app.streaming[app.current.id]);
+  const streaming = $derived(!!pane.current && !!app.streaming[pane.current.id]);
   const efforts = $derived(app.currentModel?.supportedReasoningEfforts ?? []);
   const effortLabel = $derived(app.effort ?? app.currentModel?.defaultReasoningEffort ?? "default");
 
@@ -38,7 +36,7 @@
 
   function submit() {
     if (streaming || !text.trim()) return;
-    app.send(text);
+    app.send(text, pane);
     text = "";
     queueMicrotask(resize);
   }
@@ -69,9 +67,9 @@
   ></textarea>
 
   <div class="row">
-    <div class="pick">
-      <button class="pill" onclick={(e) => { e.stopPropagation(); menu = menu === "model" ? null : "model"; }}>
-        {app.currentModel?.displayName ?? "Select model"}
+    <div class="pick model">
+      <button class="pill" title={app.currentModel?.displayName} onclick={(e) => { e.stopPropagation(); menu = menu === "model" ? null : "model"; }}>
+        <span class="lbl">{app.currentModel?.displayName ?? "Select model"}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {#if menu === "model"}
@@ -89,9 +87,9 @@
 
     {#if efforts.length}
       <div class="pick">
-        <button class="pill" onclick={(e) => { e.stopPropagation(); menu = menu === "effort" ? null : "effort"; }}>
+        <button class="pill" title="Reasoning: {effortLabel}" onclick={(e) => { e.stopPropagation(); menu = menu === "effort" ? null : "effort"; }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3ZM9 21h6" /></svg>
-          <span class="cap">{effortLabel}</span>
+          <span class="cap lbl hide-sm">{effortLabel}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
         </button>
         {#if menu === "effort"}
@@ -108,9 +106,9 @@
     {/if}
 
     <div class="pick">
-      <button class="pill" class:danger={app.access === "full"} onclick={(e) => { e.stopPropagation(); menu = menu === "access" ? null : "access"; }}>
+      <button class="pill" class:full={app.access === "full"} title="Access: {accessLabel}" onclick={(e) => { e.stopPropagation(); menu = menu === "access" ? null : "access"; }}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6Z" /></svg>
-        {accessLabel}
+        <span class="lbl hide-sm">{accessLabel}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {#if menu === "access"}
@@ -127,42 +125,18 @@
 
     <div class="spacer"></div>
 
-    {#if app.accounts.length > 1}
-      <div class="pick">
-        <button
-          class="pill"
-          disabled={!!app.current}
-          title={app.current ? `This chat uses ${app.accountLabel(chatAccount)}` : "Account for this chat"}
-          onclick={(e) => { e.stopPropagation(); menu = menu === "account" ? null : "account"; }}
-        >
-          <span class="mini-avatar">{(app.accountLabel(chatAccount))[0].toUpperCase()}</span>
-          <span class="acct-name">{shortEmail(app.accountLabel(chatAccount))}</span>
-        </button>
-        {#if menu === "account"}
-          <div class="menu right" role="menu" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
-            {#each app.accounts.filter((a) => a.email) as a (a.id)}
-              <button class="opt" class:sel={a.id === app.activeAccount} onclick={() => { app.setActiveAccount(a.id); menu = null; }}>
-                <div class="name">{a.email}</div>
-                <div class="desc cap">ChatGPT {a.plan ?? ""}</div>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-
     <button
       class="pill folder"
       title={folder ?? "Choose a project folder"}
-      disabled={!!app.current}
+      disabled={!!pane.current}
       onclick={() => app.pickFolder()}
     >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
-      <span>{folderName ?? "Choose folder"}</span>
+      {#if folder}<ProjectIcon path={folder} size={15} />{:else}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>{/if}
+      <span class="lbl hide-xs">{folderName ?? "Choose folder"}</span>
     </button>
 
     {#if streaming}
-      <button class="send stop" title="Stop (Esc)" onclick={() => app.stop()}>
+      <button class="send stop" title="Stop (Esc)" onclick={() => app.stop(pane)}>
         <svg width="12" height="12" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" /></svg>
       </button>
     {:else}
@@ -175,6 +149,7 @@
 
 <style>
   .composer {
+    container-type: inline-size;
     background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
     padding: 12px 12px 10px 16px;
     box-shadow: 0 0 0 1px rgb(255 255 255 / 0.02), 0 12px 40px rgb(0 0 0 / 0.6);
@@ -186,29 +161,27 @@
     user-select: text; -webkit-user-select: text;
   }
   textarea::placeholder { color: var(--faint); }
-  .row { display: flex; align-items: center; gap: 6px; }
-  .spacer { flex: 1; }
-  .pick { position: relative; }
+  .row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .spacer { flex: 1; min-width: 0; }
+  .pick { position: relative; flex: none; }
+  .pick.model { flex: 0 1 auto; min-width: 0; }
+  .pick.model .pill { max-width: 100%; }
   .pill {
     height: 30px; padding: 0 10px; border-radius: 999px; display: flex; align-items: center; gap: 6px;
-    font-size: 13px; color: var(--muted); border: 1px solid transparent;
+    font-size: 13px; color: var(--muted); border: 1px solid transparent; white-space: nowrap; min-width: 0;
   }
+  .pill svg { flex: none; }
+  .lbl { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+  .send { flex: none; }
   .pill:hover:not(:disabled) { background: var(--hover); color: var(--text); }
-  .pill.danger { color: var(--danger); }
-  .folder { max-width: 200px; }
-  .mini-avatar {
-    width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; flex: none;
-    background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 700;
-  }
-  .acct-name { max-width: 120px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .menu.right { left: auto; right: 0; }
+  .pill.full { color: var(--accent); }
+  .folder { flex: 0 1 auto; max-width: 200px; }
   .pill:disabled { cursor: default; }
-  .folder span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .folder:disabled { opacity: 0.8; }
   .cap { text-transform: capitalize; }
   .menu {
     position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 20;
-    width: 320px; max-height: 380px; overflow-y: auto; padding: 6px;
+    width: 320px; max-width: calc(100cqw - 8px); max-height: 380px; overflow-y: auto; padding: 6px;
     background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
     box-shadow: 0 16px 40px rgb(0 0 0 / 0.35);
   }
@@ -225,4 +198,16 @@
   }
   .send:disabled { opacity: 0.25; }
   .send.stop { background: var(--text); }
+
+  /* Narrow composers (split view, small windows): drop labels to icons, keep everything on one row. */
+  @container (max-width: 520px) {
+    .hide-sm { display: none; }
+    .pill { padding: 0 8px; }
+    .folder { max-width: 140px; }
+  }
+  @container (max-width: 380px) {
+    .hide-xs { display: none; }
+    .row { gap: 2px; }
+    .menu { left: -8px; }
+  }
 </style>

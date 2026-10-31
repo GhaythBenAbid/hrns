@@ -1,6 +1,8 @@
 mod accounts;
 mod codex;
+mod git;
 mod pricing;
+mod projects;
 mod remote;
 mod store;
 mod usage;
@@ -55,6 +57,32 @@ fn git_branch(path: String) -> Option<String> {
     None
 }
 
+/// Per-file counts of the uncommitted changes in the repo containing `path` (no diff text).
+#[tauri::command]
+async fn git_status(path: String) -> Result<Option<git::Status>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::status(&path)).await.map_err(|e| e.to_string())
+}
+
+/// One file's uncommitted diff (None for binary or oversized files).
+#[tauri::command]
+async fn git_file_diff(root: String, path: String, old: Option<String>, untracked: bool) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::file_diff(&root, &path, old.as_deref(), untracked))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Project folders under the usual code locations in the home folder, for the project finder.
+#[tauri::command]
+async fn find_projects() -> Result<Vec<projects::Project>, String> {
+    tauri::async_runtime::spawn_blocking(projects::find).await.map_err(|e| e.to_string())
+}
+
+/// A project's own icon, or what it's built with (framework, else main language).
+#[tauri::command]
+async fn project_icon(path: String) -> Result<projects::Icon, String> {
+    tauri::async_runtime::spawn_blocking(move || projects::icon(&path)).await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn rename_thread(store: State<Arc<Store>>, id: String, title: String) {
     store.update(&id, |t| t.title = title);
@@ -90,6 +118,21 @@ async fn send_message(
         None => accounts.engine(&account)?,
     };
     engine.send(thread_id, text, model, effort, access, cwd).await
+}
+
+/// Have `model` name a chat from its first message (runs on the chat's own account).
+#[tauri::command]
+async fn generate_title(
+    store: State<'_, Arc<Store>>,
+    accounts: Acc<'_>,
+    thread_id: String,
+    model: String,
+    effort: Option<String>,
+) -> Result<String, String> {
+    let thread = store.get(&thread_id).ok_or("No such chat")?;
+    let first = thread.messages.iter().find(|m| m.role == "user").map(|m| m.text.clone()).ok_or("Chat has no message yet")?;
+    let engine = accounts.engine_for(&thread)?;
+    engine.generate_title(thread_id, first, model, effort).await
 }
 
 #[tauri::command]
@@ -221,9 +264,14 @@ pub fn run() {
             list_threads,
             get_thread,
             git_branch,
+            git_status,
+            git_file_diff,
+            find_projects,
+            project_icon,
             rename_thread,
             delete_thread,
             send_message,
+            generate_title,
             stop_turn,
             respond_approval,
             list_models,
