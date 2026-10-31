@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hrns vs T3 Code</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #fcfcfb; --card: #ffffff; --line: #e6e5e0;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --series-1: #2a78d6; --series-2: #eb6834; --grid: #ecebe7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110; --card: #1a1a19; --line: #2c2c2a;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --series-2: #d95926; --grid: #262624;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110; --card: #1a1a19; --line: #2c2c2a;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --series-1: #3987e5; --series-2: #d95926; --grid: #262624;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+main { max-width: 1040px; margin: 0 auto; padding: 40px 16px 80px; }
+h1 { font-size: 28px; letter-spacing: -0.02em; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 44px 0 14px; }
+.sub { color: var(--text-secondary); margin: 0; }
+.meta { color: var(--text-muted); font-size: 13px; margin-top: 10px; }
+.legend { display: flex; gap: 18px; font-size: 13px; color: var(--text-secondary); margin: 22px 0 0; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 22px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.tile .k { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.tile .v { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.tile .d { font-size: 13px; color: var(--text-secondary); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.chart { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 16px 12px; position: relative; }
+.chart h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.chart .u { font-size: 12px; color: var(--text-muted); margin: 2px 0 12px; }
+.chart .w { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+svg { display: block; width: 100%; max-width: 340px; overflow: visible; }
+svg text { fill: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+svg .val { fill: var(--text-primary); font-weight: 600; }
+.bar { transition: opacity .15s; }
+.hit:hover + .bar, .bar:hover { opacity: .8; }
+.tip { position: fixed; pointer-events: none; background: var(--card); color: var(--text-primary);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12); opacity: 0; transition: opacity .1s; z-index: 10; max-width: 260px; }
+.tablewrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--text-muted); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td.win { font-weight: 650; }
+ul.notes { color: var(--text-secondary); padding-left: 18px; }
+ul.notes li { margin: 6px 0; }
+code { font-size: 12.5px; background: var(--grid); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>hrns vs T3 Code (Nightly)</h1>
+  <p class="sub">Performance and battery efficiency of two desktop coding-agent apps on one Mac, measured on battery power.</p>
+  <p class="meta" id="meta"></p>
+  <div class="legend"><span><i style="background:var(--series-1)"></i>hrns (Tauri / WKWebView)</span><span><i style="background:var(--series-2)"></i>T3 Code Nightly (Electron)</span></div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <h2>Startup and size</h2>
+  <div class="grid" id="g-start"></div>
+
+  <h2>Idle, window in the foreground</h2>
+  <div class="grid" id="g-fg"></div>
+
+  <h2>Idle, app in the background</h2>
+  <div class="grid" id="g-bg"></div>
+
+  <h2>Where the memory goes (foreground idle, RSS per component)</h2>
+  <div class="grid" id="g-break"></div>
+
+  <h2>All numbers</h2>
+  <div class="tablewrap"><table id="tbl"></table></div>
+
+  <h2>Method and caveats</h2>
+  <ul class="notes" id="notes"></ul>
+</main>
+<div class="tip" id="tip"></div>
+
+<script>
+const DATA = {"meta": {"date": "2026-10-31 18:54", "machine": "Apple M1 Pro, 16 GB", "os": "macOS 26.2", "power": "Battery Power", "t3_version": "0.1.6-nightly.20261029.3892", "hrns_commit": "904f059", "trials": 5, "settle_s": 15, "window_s": 60}, "runs": [{"meta": {"date": "2026-10-31 18:54", "machine": "Apple M1 Pro, 16 GB", "os": "macOS 26.2", "power": "Battery Power", "t3_version": "0.1.6-nightly.20261029.3892", "hrns_commit": "904f059", "trials": 5, "settle_s": 15, "window_s": 60}, "hrns": {"bundle_mb": 5.3, "launch_s": [0.389, 0.329, 0.339, 0.323, 0.335], "idle_fg": {"cpu_pct": 0.86, "rss_avg_mb": 427.4, "rss_peak_mb": 479.4, "footprint_mb": 183.4, "procs": 5, "threads": 44, "energy_avg": 0.43, "energy_peak": 5.5, "wakeups_avg": 24.1, "breakdown": {"com.apple.WebKit.GPU": {"n": 1, "rss_mb": 36.36, "cpu_s": 0.02}, "com.apple.WebKit.Networking": {"n": 1, "rss_mb": 15.66, "cpu_s": 0.0}, "com.apple.WebKit.WebContent": {"n": 1, "rss_mb": 58.11, "cpu_s": 0.03}, "codex app-server": {"n": 1, "rss_mb": 197.86, "cpu_s": 0.44}, "hrns": {"n": 1, "rss_mb": 112.7, "cpu_s": 0.03}}}, "idle_bg": {"cpu_pct": 0.03, "rss_avg_mb": 420.7, "rss_peak_mb": 420.7, "footprint_mb": 152.4, "procs": 5, "threads": 46, "energy_avg": 0.0, "energy_peak": 0.1, "wakeups_avg": 47.3, "breakdown": {"com.apple.WebKit.GPU": {"n": 1, "rss_mb": 36.34, "cpu_s": 0.0}, "com.apple.WebKit.Networking": {"n": 1, "rss_mb": 15.66, "cpu_s": 0.0}, "com.apple.WebKit.WebContent": {"n": 1, "rss_mb": 58.09, "cpu_s": 0.01}, "codex app-server": {"n": 1, "rss_mb": 197.86, "cpu_s": 0.0}, "hrns": {"n": 1, "rss_mb": 112.72, "cpu_s": 0.01}}}}, "t3": {"bundle_mb": 460.1, "launch_s": [2.688, 2.602, 2.488, 2.454, 2.424], "idle_fg": {"cpu_pct": 4.9, "rss_avg_mb": 1096.4, "rss_peak_mb": 1710.0, "footprint_mb": 599.0, "procs": 8, "threads": 106, "energy_avg": 1.9, "energy_peak": 8.8, "wakeups_avg": 105.6, "breakdown": {"t3-resource-monitor": {"n": 1, "rss_mb": 4.66, "cpu_s": 0.0}, "T3 Code (Nightly)": {"n": 2, "rss_mb": 417.86, "cpu_s": 1.45}, "T3 Code (Nightly) Helper (Renderer)": {"n": 1, "rss_mb": 221.22, "cpu_s": 0.72}, "cloudflared tunnel": {"n": 1, "rss_mb": 38.22, "cpu_s": 0.27}, "T3 Code (Nightly) Helper": {"n": 2, "rss_mb": 132.41, "cpu_s": 0.51}}}, "idle_bg": {"cpu_pct": 1.69, "rss_avg_mb": 815.2, "rss_peak_mb": 818.5, "footprint_mb": 599.9, "procs": 7, "threads": 92, "energy_avg": 0.52, "energy_peak": 1.5, "wakeups_avg": 135.8, "breakdown": {"t3-resource-monitor": {"n": 1, "rss_mb": 4.67, "cpu_s": 0.0}, "T3 Code (Nightly)": {"n": 2, "rss_mb": 419.36, "cpu_s": 0.52}, "T3 Code (Nightly) Helper (Renderer)": {"n": 1, "rss_mb": 220.8, "cpu_s": 0.15}, "cloudflared tunnel": {"n": 1, "rss_mb": 41.56, "cpu_s": 0.29}, "T3 Code (Nightly) Helper": {"n": 2, "rss_mb": 132.62, "cpu_s": 0.06}}}}}, {"meta": {"date": "2026-10-31 19:01", "machine": "Apple M1 Pro, 16 GB", "os": "macOS 26.2", "power": "Battery Power", "t3_version": "0.1.6-nightly.20261029.3892", "hrns_commit": "904f059", "trials": 5, "settle_s": 15, "window_s": 60}, "hrns": {"bundle_mb": 5.3, "launch_s": [0.374, 0.339, 0.407, 0.344, 0.336], "idle_fg": {"cpu_pct": 0.76, "rss_avg_mb": 424.3, "rss_peak_mb": 481.9, "footprint_mb": 239.7, "procs": 5, "threads": 48, "energy_avg": 0.55, "energy_peak": 6.4, "wakeups_avg": 16.7, "breakdown": {"codex app-server": {"n": 1, "rss_mb": 259.62, "cpu_s": 0.43}, "hrns": {"n": 1, "rss_mb": 111.12, "cpu_s": 0.01}, "com.apple.WebKit.GPU": {"n": 1, "rss_mb": 37.19, "cpu_s": 0.01}, "com.apple.WebKit.Networking": {"n": 1, "rss_mb": 15.66, "cpu_s": 0.0}, "com.apple.WebKit.WebContent": {"n": 1, "rss_mb": 58.3, "cpu_s": 0.01}}}, "idle_bg": {"cpu_pct": 0.32, "rss_avg_mb": 412.5, "rss_peak_mb": 482.8, "footprint_mb": 158.4, "procs": 5, "threads": 48, "energy_avg": 0.06, "energy_peak": 0.7, "wakeups_avg": 31.3, "breakdown": {"codex app-server": {"n": 1, "rss_mb": 166.22, "cpu_s": 0.0}, "hrns": {"n": 1, "rss_mb": 106.17, "cpu_s": 0.1}, "com.apple.WebKit.GPU": {"n": 1, "rss_mb": 33.14, "cpu_s": 0.03}, "com.apple.WebKit.Networking": {"n": 1, "rss_mb": 13.73, "cpu_s": 0.0}, "com.apple.WebKit.WebContent": {"n": 1, "rss_mb": 54.23, "cpu_s": 0.06}}}}, "t3": {"bundle_mb": 460.1, "launch_s": [2.989, 2.589, 2.724, 2.65, 2.557], "idle_fg": {"cpu_pct": 5.13, "rss_avg_mb": 1183.7, "rss_peak_mb": 1895.3, "footprint_mb": 582.0, "procs": 8, "threads": 102, "energy_avg": 2.44, "energy_peak": 31.5, "wakeups_avg": 57.3, "breakdown": {"T3 Code (Nightly) Helper (Renderer)": {"n": 1, "rss_mb": 236.8, "cpu_s": 0.71}, "T3 Code (Nightly)": {"n": 2, "rss_mb": 508.75, "cpu_s": 1.34}, "t3-resource-monitor": {"n": 1, "rss_mb": 5.81, "cpu_s": 0.0}, "cloudflared tunnel": {"n": 1, "rss_mb": 43.44, "cpu_s": 0.29}, "T3 Code (Nightly) Helper": {"n": 2, "rss_mb": 134.61, "cpu_s": 0.75}}}, "idle_bg": {"cpu_pct": 1.83, "rss_avg_mb": 929.0, "rss_peak_mb": 931.2, "footprint_mb": 582.0, "procs": 7, "threads": 97, "energy_avg": 0.56, "energy_peak": 1.2, "wakeups_avg": 178.5, "breakdown": {"T3 Code (Nightly) Helper (Renderer)": {"n": 1, "rss_mb": 237.3, "cpu_s": 0.16}, "T3 Code (Nightly)": {"n": 2, "rss_mb": 508.36, "cpu_s": 0.58}, "t3-resource-monitor": {"n": 1, "rss_mb": 5.81, "cpu_s": 0.0}, "cloudflared tunnel": {"n": 1, "rss_mb": 44.52, "cpu_s": 0.3}, "T3 Code (Nightly) Helper": {"n": 2, "rss_mb": 134.78, "cpu_s": 0.07}}}}}]};
+const runs = DATA.runs;
+const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+const median = a => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const avg = (app, scen, key) => mean(runs.map(r => r[app][scen][key]));
+const launches = app => runs.flatMap(r => r[app].launch_s).filter(x => x != null);
+
+const M = {
+  bundle:   { label: "App bundle size", unit: "MB on disk", get: a => runs[0][a].bundle_mb, fmt: v => v.toFixed(1) },
+  launch:   { label: "Launch to first window", unit: "seconds, median of 10 launches", get: a => median(launches(a)), fmt: v => v.toFixed(2), detail: a => "min " + Math.min(...launches(a)).toFixed(2) + " s, max " + Math.max(...launches(a)).toFixed(2) + " s" },
+};
+for (const [scen, tag] of [["idle_fg", "fg"], ["idle_bg", "bg"]]) {
+  M[tag + "_fp"]  = { label: "Memory footprint", unit: "MB, phys_footprint summed over all processes", get: a => avg(a, scen, "footprint_mb"), fmt: v => v.toFixed(0) };
+  M[tag + "_rss"] = { label: "Resident memory (RSS)", unit: "MB, average over 60 s (counts shared pages)", get: a => avg(a, scen, "rss_avg_mb"), fmt: v => v.toFixed(0) };
+  M[tag + "_cpu"] = { label: "CPU use", unit: "% of one core, average over 60 s", get: a => avg(a, scen, "cpu_pct"), fmt: v => v.toFixed(2) };
+  M[tag + "_en"]  = { label: "Energy impact", unit: "macOS energy impact score, average", get: a => avg(a, scen, "energy_avg"), fmt: v => v.toFixed(2) };
+  M[tag + "_wk"]  = { label: "Idle wakeups", unit: "wakeups per second, average", get: a => avg(a, scen, "wakeups_avg"), fmt: v => v.toFixed(0) };
+  M[tag + "_pr"]  = { label: "Processes / threads", unit: "processes, with thread count", get: a => avg(a, scen, "procs"), fmt: v => v.toFixed(0), detail: a => Math.round(avg(a, scen, "threads")) + " threads" };
+}
+
+const APPS = [["hrns", "hrns", "var(--series-1)"], ["t3", "T3 Code", "var(--series-2)"]];
+const tip = document.getElementById("tip");
+function showTip(e, html) { tip.innerHTML = html; tip.style.opacity = 1; moveTip(e); }
+function moveTip(e) { const w = tip.offsetWidth; tip.style.left = Math.min(e.clientX + 14, innerWidth - w - 8) + "px"; tip.style.top = (e.clientY + 14) + "px"; }
+function hideTip() { tip.style.opacity = 0; }
+
+function ratioText(h, t) {
+  if (h === 0 && t === 0) return "tie";
+  if (h <= t) return "hrns is " + (h === 0 ? "∞" : (t / h).toFixed(1)) + "× lower";
+  return "T3 Code is " + (h / t).toFixed(1) + "× lower";
+}
+
+function chart(id, key) {
+  const m = M[key];
+  const vals = APPS.map(([a]) => m.get(a));
+  const max = Math.max(...vals) || 1;
+  const W = 320, rowH = 30, gap = 10, labelW = 64, valW = 56, H = APPS.length * rowH + (APPS.length - 1) * gap;
+  const plotW = W - labelW - valW;
+  let g = "";
+  APPS.forEach(([a, name, color], i) => {
+    const y = i * (rowH + gap), w = Math.max(2, vals[i] / max * plotW);
+    const tipHtml = `<b>${name}</b><br>${m.label}: ${m.fmt(vals[i])}` + (m.detail ? `<br>${m.detail(a)}` : "");
+    g += `<text x="0" y="${y + rowH / 2 + 4}">${name}</text>
+      <rect class="bar" x="${labelW}" y="${y + 4}" width="${w}" height="${rowH - 8}" rx="4" fill="${color}"/>
+      <text class="val" x="${labelW + w + 6}" y="${y + rowH / 2 + 4}">${m.fmt(vals[i])}</text>
+      <rect class="hit" x="0" y="${y}" width="${W}" height="${rowH}" fill="transparent" data-tip="${encodeURIComponent(tipHtml)}"/>`;
+  });
+  const el = document.createElement("div");
+  el.className = "chart";
+  el.innerHTML = `<h3>${m.label}</h3><div class="u">${m.unit} · lower is better</div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${m.label}: hrns ${m.fmt(vals[0])}, T3 Code ${m.fmt(vals[1])}">${g}</svg>
+    <div class="w">${ratioText(vals[0], vals[1])}</div>`;
+  el.querySelectorAll(".hit").forEach(r => {
+    r.addEventListener("mouseenter", e => showTip(e, decodeURIComponent(r.dataset.tip)));
+    r.addEventListener("mousemove", moveTip);
+    r.addEventListener("mouseleave", hideTip);
+  });
+  document.getElementById(id).appendChild(el);
+}
+
+function breakdown(id, app, name, color) {
+  const b = runs[0][app].idle_fg.breakdown;
+  const rows = Object.entries(b).map(([k, v]) => [k.replace("T3 Code (Nightly) ", "").replace("com.apple.WebKit.", "WebKit "), v.rss_mb, v.cpu_s, v.n])
+    .filter(r => r[1] > 3).sort((x, y) => y[1] - x[1]);
+  const max = Math.max(...Object.values(runs[0].t3.idle_fg.breakdown).map(v => v.rss_mb));
+  const W = 320, rowH = 26, labelW = 130, plotW = W - labelW - 50;
+  let g = "";
+  rows.forEach(([k, rss, cpu, n], i) => {
+    const y = i * rowH, w = Math.max(2, rss / max * plotW);
+    const t = `<b>${k}</b>${n > 1 ? " (" + n + " processes)" : ""}<br>RSS ${rss.toFixed(0)} MB<br>CPU ${cpu.toFixed(2)} s over 60 s`;
+    g += `<text x="0" y="${y + 17}">${k.length > 19 ? k.slice(0, 18) + "…" : k}</text>
+      <rect class="bar" x="${labelW}" y="${y + 5}" width="${w}" height="${rowH - 10}" rx="4" fill="${color}"/>
+      <text class="val" x="${labelW + w + 6}" y="${y + 17}">${rss.toFixed(0)}</text>
+      <rect class="hit" x="0" y="${y}" width="${W}" height="${rowH}" fill="transparent" data-tip="${encodeURIComponent(t)}"/>`;
+  });
+  const el = document.createElement("div");
+  el.className = "chart";
+  el.innerHTML = `<h3>${name}</h3><div class="u">MB resident, same scale for both apps</div><svg viewBox="0 0 ${W} ${rows.length * rowH}">${g}</svg>`;
+  el.querySelectorAll(".hit").forEach(r => {
+    r.addEventListener("mouseenter", e => showTip(e, decodeURIComponent(r.dataset.tip)));
+    r.addEventListener("mousemove", moveTip);
+    r.addEventListener("mouseleave", hideTip);
+  });
+  document.getElementById(id).appendChild(el);
+}
+
+// meta + tiles
+const md = DATA.meta;
+document.getElementById("meta").textContent =
+  `${md.date} · ${md.machine} · ${md.os} · on ${md.power.toLowerCase()} · hrns ${md.hrns_commit} (release build) vs T3 Code ${md.t3_version} · 2 runs`;
+const tiles = [
+  ["Launch", "launch", "faster to first window"],
+  ["Bundle", "bundle", "smaller on disk"],
+  ["Memory (fg)", "fg_fp", "less memory footprint"],
+  ["Energy (fg)", "fg_en", "lower energy impact"],
+  ["CPU (bg)", "bg_cpu", "less CPU in background"],
+];
+document.getElementById("tiles").innerHTML = tiles.map(([k, key, d]) => {
+  const h = M[key].get("hrns"), t = M[key].get("t3");
+  return `<div class="tile"><div class="k">${k}</div><div class="v">${(t / h).toFixed(1)}×</div><div class="d">${d}<br>${M[key].fmt(h)} vs ${M[key].fmt(t)}</div></div>`;
+}).join("");
+
+["launch", "bundle"].forEach(k => chart("g-start", k));
+["fp", "rss", "cpu", "en", "wk", "pr"].forEach(k => chart("g-fg", "fg_" + k));
+["fp", "rss", "cpu", "en", "wk", "pr"].forEach(k => chart("g-bg", "bg_" + k));
+breakdown("g-break", "hrns", "hrns", "var(--series-1)");
+breakdown("g-break", "t3", "T3 Code", "var(--series-2)");
+
+// table
+const rows = [["Startup", ["launch", "bundle"]], ["Foreground idle", ["fg_fp", "fg_rss", "fg_cpu", "fg_en", "fg_wk", "fg_pr"]], ["Background idle", ["bg_fp", "bg_rss", "bg_cpu", "bg_en", "bg_wk", "bg_pr"]]];
+let html = "<tr><th>Metric</th><th>hrns</th><th>T3 Code</th><th>Difference</th></tr>";
+for (const [sec, keys] of rows) {
+  html += `<tr><td colspan="4" style="color:var(--text-muted);padding-top:16px">${sec}</td></tr>`;
+  for (const k of keys) {
+    const m = M[k], h = m.get("hrns"), t = m.get("t3");
+    html += `<tr><td>${m.label} <span style="color:var(--text-muted)">(${m.unit.split(",")[0]})</span></td>
+      <td class="${h <= t ? "win" : ""}">${m.fmt(h)}</td><td class="${t < h ? "win" : ""}">${m.fmt(t)}</td><td>${ratioText(h, t)}</td></tr>`;
+  }
+}
+document.getElementById("tbl").innerHTML = html;
+
+document.getElementById("notes").innerHTML = [
+  "Both apps were launched with <code>open -n</code> with their normal user data, on battery, with the same other apps open. Each app gets 5 cold launches per run, then 15 s to settle, 60 s of foreground idle sampling, then Finder is brought to the front and 60 s of background idle are sampled. Everything was run twice and the two runs averaged.",
+  "<b>Launch</b> stops the clock when the window server shows the app's first real window. Electron can show a window before its content has painted, so this is if anything kind to T3 Code.",
+  "<b>Process tree</b>: T3 Code counts the main process and all its children (GPU, network and renderer helpers, the Node backend server, <code>t3-resource-monitor</code>, and a <code>cloudflared tunnel</code> child process). hrns counts its own process, the <code>codex app-server</code> sidecar, and the WebKit GPU/Networking/WebContent XPC processes that appeared when it launched.",
+  "<b>hrns starts Codex at launch.</b> The README says Codex starts on first use, but the startup calls <code>account_status</code> and <code>list_models</code> both spawn it. That sidecar accounts for about 200 MB RSS and most of hrns's idle CPU and wakeups. Caching those two answers would cut hrns idle memory roughly in half.",
+  "<b>Memory footprint</b> (from <code>footprint</code>, the number Activity Monitor shows) is the fairer memory number. RSS counts shared framework pages again in every process, which inflates multi-process apps.",
+  "<b>Energy impact</b> is the macOS score from <code>top</code> (the same one Activity Monitor uses). It is relative, not watts: <code>powermetrics</code> needs sudo and was not used. Single 60 s idle windows are noisy, but both runs ranked the apps the same way.",
+  "Not measured: behavior during an active agent turn (streaming output, long transcripts). Both apps then spend most of their time in the agent CLI, which this benchmark leaves out.",
+].map(s => `<li>${s}</li>`).join("");
+</script>
+</body>
+</html>
