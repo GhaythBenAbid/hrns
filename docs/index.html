@@ -137,9 +137,10 @@ p { margin: 0; }
 /* Headline words rise in once on load. */
 .hero h1 .w { display: inline-block; animation: rise .7s var(--ease) both; }
 @keyframes rise { from { opacity: 0; transform: translateY(.35em); filter: blur(6px); } }
-.hero .lede, .hero .actions, .hero .facts { animation: rise .7s var(--ease) both; }
+@keyframes lift { from { opacity: 0; transform: translateY(14px); } }
+.hero .lede, .hero .actions, .hero .facts { animation: lift .7s var(--ease) both; }
 .hero .lede { animation-delay: .35s; } .hero .actions { animation-delay: .45s; } .hero .facts { animation-delay: .55s; }
-.term { animation: rise .8s .2s var(--ease) both; }
+.term { animation: lift .8s .2s var(--ease) both; }
 
 /* Live session pieces */
 .caret { display: inline-block; width: .55em; height: 1.05em; margin-left: 2px; vertical-align: -0.18em; background: var(--violet); animation: blink 1s steps(1) infinite; }
@@ -551,6 +552,8 @@ footer .legal { margin-left: auto; }
   async function play() {
     const id = ++run;
     replayBtn.hidden = true;
+    // Hold the window at its tallest size so the replay never makes it shrink.
+    log.style.minHeight = Math.max(parseFloat(log.style.minHeight) || 0, log.offsetHeight) + "px";
     log.innerHTML = "";
     const you = line("you", '<span class="t"></span><span class="caret"></span>');
     const text = "Add a dark mode toggle to settings. Follow the system by default.";
