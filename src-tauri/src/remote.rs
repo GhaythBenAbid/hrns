@@ -114,6 +114,11 @@ impl Remote {
             .route("/api/stop", post(stop))
             .route("/api/approval", post(approval))
             .route("/api/events", get(events))
+            .route("/api/projects", get(projects))
+            .route("/api/projects/icon", get(project_icon))
+            .route("/api/git/status", get(git_status))
+            .route("/api/git/diff", get(git_diff))
+            .route("/api/title", post(title))
             .layer(middleware::from_fn_with_state(ctx.clone(), auth))
             .with_state(ctx);
 
@@ -397,5 +402,80 @@ async fn pump(mut socket: WebSocket, mut rx: broadcast::Receiver<String>) {
                 _ => {}
             },
         }
+    }
+}
+
+// ---------- projects, git changes and chat titles (mirrors the desktop commands) ----------
+
+async fn projects() -> Response {
+    match tokio::task::spawn_blocking(crate::projects::find).await {
+        Ok(p) => Json(json!(p)).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct PathQuery {
+    path: String,
+}
+
+async fn project_icon(Query(q): Query<PathQuery>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::projects::icon(&q.path)).await {
+        Ok(i) => Json(json!(i)).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+async fn git_status(Query(q): Query<PathQuery>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::git::status(&q.path)).await {
+        Ok(s) => Json(json!(s)).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct DiffQuery {
+    root: String,
+    path: String,
+    old: Option<String>,
+    #[serde(default)]
+    untracked: bool,
+}
+
+/// Paths are relative to the repo root; refuse anything that could step outside it.
+fn inside_repo(p: &str) -> bool {
+    let p = std::path::Path::new(p);
+    !p.is_absolute() && p.components().all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+}
+
+async fn git_diff(Query(q): Query<DiffQuery>) -> Response {
+    if !inside_repo(&q.path) || q.old.as_deref().is_some_and(|o| !inside_repo(o)) {
+        return err("bad path");
+    }
+    match tokio::task::spawn_blocking(move || crate::git::file_diff(&q.root, &q.path, q.old.as_deref(), q.untracked)).await {
+        Ok(d) => Json(json!({ "diff": d })).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TitleBody {
+    thread_id: String,
+    model: String,
+    effort: Option<String>,
+}
+
+/// Have `model` name a chat from its first message; phones also get a `thread-title` event.
+async fn title(State(ctx): State<Ctx>, Json(b): Json<TitleBody>) -> Response {
+    let Some(t) = store(&ctx).get(&b.thread_id) else { return err("no such chat") };
+    let Some(first) = t.messages.iter().find(|m| m.role == "user").map(|m| m.text.clone()) else { return err("Chat has no message yet") };
+    let engine = match accounts(&ctx).engine_for(&t) {
+        Ok(e) => e,
+        Err(e) => return err(e),
+    };
+    match engine.generate_title(b.thread_id, first, b.model, b.effort).await {
+        Ok(title) => Json(json!({ "title": title })).into_response(),
+        Err(e) => err(e),
     }
 }

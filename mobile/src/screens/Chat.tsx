@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View, type ScrollViewInstance } from "react-native";
 import Markdown from "react-native-markdown-display";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { base, describeCommand, diffStat, type Approval, type ChatEvent, type Client, type Live, type Message, type Part, type Prefs, type Thread } from "../api";
+import { base, describeCommand, diffStat, type Approval, type ChatEvent, type Client, type GitStatus, type Live, type Message, type Part, type Prefs, type Thread } from "../api";
+import { AnimatedTitle } from "../AnimatedTitle";
 import { Icon, StopIcon } from "../Icon";
-import { c } from "../theme";
+import { alpha, c, sheet, themed } from "../theme";
 
 const newId = () =>
   "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
@@ -12,15 +13,16 @@ const newId = () =>
     return (ch === "x" ? r : (r & 0x3) | 0x8).toString(16);
   });
 
-type Props = { client: Client; threadId: string | null; cwd: string | null; prefs: Prefs; onBack: () => void };
+type Props = { client: Client; threadId: string | null; cwd: string | null; prefs: Prefs; onBack: () => void; onChanges: (cwd: string) => void };
 
-export function Chat({ client, threadId, cwd, prefs, onBack }: Props) {
+export function Chat({ client, threadId, cwd, prefs, onBack, onChanges }: Props) {
   // A new chat gets its id up front so streamed events can be matched immediately.
   const [id] = useState(threadId ?? newId());
   const [thread, setThread] = useState<Thread | null>(null);
   const [live, setLive] = useState<Live | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [git, setGit] = useState<GitStatus | null>(null);
   const liveRef = useRef<Live | null>(null);
   const flush = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scroller = useRef<ScrollViewInstance>(null);
@@ -58,10 +60,18 @@ export function Chat({ client, threadId, cwd, prefs, onBack }: Props) {
     load();
   }, [load]);
 
+  // Uncommitted changes in the chat's project, refreshed after every turn.
+  const folder = thread?.cwd ?? cwd;
+  const loadGit = useCallback(() => {
+    if (folder) client.gitStatus(folder).then(setGit).catch(() => {});
+  }, [client, folder]);
+  useEffect(loadGit, [loadGit]);
+
   useEffect(
     () =>
       client.on((e) => {
         if (e.type === "resync") return void load();
+        if (e.type === "thread-title" && e.payload.threadId === id) return setThread((t) => (t ? { ...t, title: e.payload.title } : t));
         if (e.type !== "chat" || e.payload.threadId !== id) return;
         apply(e.payload);
       }),
@@ -70,6 +80,7 @@ export function Chat({ client, threadId, cwd, prefs, onBack }: Props) {
 
   function apply(ev: ChatEvent) {
     if (ev.kind === "done") {
+      loadGit();
       liveRef.current = null;
       setLive(null);
       if (ev.message) setThread((t) => (t && !t.messages.some((m) => m.id === ev.message!.id) ? { ...t, messages: [...t.messages, ev.message!] } : t));
@@ -112,15 +123,33 @@ export function Chat({ client, threadId, cwd, prefs, onBack }: Props) {
     try {
       // Phone defaults apply only when starting a chat; existing chats keep their own settings.
       const isNew = !thread || thread.messages.length === 0 || !thread.model;
-      const t = await client.send({ threadId: id, text: body, cwd: thread?.cwd ?? cwd, ...(isNew ? prefs : {}) });
+      const { titleModel, ...defaults } = prefs;
+      const t = await client.send({ threadId: id, text: body, cwd: thread?.cwd ?? cwd, ...(isNew ? defaults : {}) });
       setThread((cur) => ({ ...t, messages: cur?.messages ?? t.messages }));
+      if (isNew) nameChat(titleModel);
     } catch (e) {
       setLiveNow(null);
       setError((e as Error).message);
     }
   }
 
+  /** Same as the desktop: a small, fast model names the chat; the new title scrambles in. */
+  async function nameChat(choice = "auto") {
+    if (choice === "off") return;
+    try {
+      const models = await client.models(prefs.account ?? "default");
+      const m = models.find((x) => x.id === choice) ?? models.find((x) => /mini|nano|spark|flash|lite/i.test(x.id)) ?? models.find((x) => x.isDefault) ?? models[0];
+      if (!m) return;
+      const effort = ["none", "minimal", "low"].find((e) => m.supportedReasoningEfforts.some((s) => s.reasoningEffort === e)) ?? null;
+      const title = await client.title(id, m.id, effort);
+      setThread((t) => (t ? { ...t, title } : t));
+    } catch {
+      // Keep the first-line title.
+    }
+  }
+
   const busy = !!live;
+  const access = thread?.access;
   const title = thread?.title ?? "New chat";
 
   return (
@@ -130,11 +159,21 @@ export function Chat({ client, threadId, cwd, prefs, onBack }: Props) {
           <Icon name="back" size={24} color={c.text} strokeWidth={2.2} />
         </Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          {/* The id only becomes stable once the chat has loaded, so the placeholder → real title swap doesn't animate. */}
+          <AnimatedTitle style={styles.title} text={title} id={thread ? id : undefined} />
           <Text style={styles.sub} numberOfLines={1}>
-            {base(thread?.cwd ?? cwd)}{thread?.model ? ` · ${thread.model.replace(/^gpt-/i, "")}` : ""}{thread?.access ? ` · ${thread.access === "full" ? "Full access" : thread.access === "read-only" ? "Read only" : "Auto"}` : ""}
+            {base(folder)}{thread?.model ? ` · ${thread.model.replace(/^gpt-/i, "")}` : ""}
+            {access ? " · " : ""}
+            {access ? <Text style={access === "full" ? { color: c.accent, fontWeight: "600" } : undefined}>{access === "full" ? "Full access" : access === "read-only" ? "Read only" : "Auto"}</Text> : null}
           </Text>
         </View>
+        {folder && git && git.files.length > 0 && (
+          <Pressable style={({ pressed }) => [styles.changes, pressed && { backgroundColor: c.hover }]} onPress={() => onChanges(folder)} hitSlop={6} accessibilityLabel={`${git.files.length} uncommitted files`}>
+            <Icon name="branch" size={14} color={c.muted} />
+            <Text style={[styles.changesNum, { color: c.green }]}>+{git.add}</Text>
+            <Text style={[styles.changesNum, { color: c.danger }]}>−{git.del}</Text>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView
@@ -259,7 +298,7 @@ function Steps({ parts, live }: { parts: Part[]; live: boolean }) {
 
 function PartView({ part }: { part: Part }) {
   if (part.type === "text" || part.type === "plan") {
-    return <Markdown style={md}>{part.text}</Markdown>;
+    return <Markdown style={md()}>{part.text}</Markdown>;
   }
   if (part.type === "fileChange") {
     return (
@@ -308,7 +347,7 @@ function ApprovalCard({ a, onDecide }: { a: Approval; onDecide: (d: "accept" | "
   );
 }
 
-const md = StyleSheet.create({
+const md = themed(() => ({
   body: { color: c.text, fontSize: 15.5, lineHeight: 23 },
   heading1: { color: c.text, fontSize: 20, fontWeight: "700", marginTop: 10 },
   heading2: { color: c.text, fontSize: 18, fontWeight: "700", marginTop: 10 },
@@ -316,8 +355,8 @@ const md = StyleSheet.create({
   strong: { fontWeight: "700" },
   link: { color: c.accent },
   code_inline: { backgroundColor: c.raised, color: c.text, fontFamily: c.mono, fontSize: 13, borderRadius: 4, paddingHorizontal: 4 },
-  fence: { backgroundColor: "#0b0b0d", color: "#d4d4d8", fontFamily: c.mono, fontSize: 12.5, borderRadius: 10, borderWidth: 1, borderColor: c.border, padding: 12 },
-  code_block: { backgroundColor: "#0b0b0d", color: "#d4d4d8", fontFamily: c.mono, fontSize: 12.5, borderRadius: 10, padding: 12 },
+  fence: { backgroundColor: c.codeBg, color: c.codeText, fontFamily: c.mono, fontSize: 12.5, borderRadius: 10, borderWidth: 1, borderColor: c.border, padding: 12 },
+  code_block: { backgroundColor: c.codeBg, color: c.codeText, fontFamily: c.mono, fontSize: 12.5, borderRadius: 10, padding: 12 },
   blockquote: { backgroundColor: "transparent", borderLeftColor: c.border, borderLeftWidth: 3, paddingLeft: 10 },
   table: { borderColor: c.border, borderRadius: 8 },
   th: { padding: 6, borderColor: c.border },
@@ -326,11 +365,13 @@ const md = StyleSheet.create({
   hr: { backgroundColor: c.border },
   bullet_list_icon: { color: c.muted },
   ordered_list_icon: { color: c.muted },
-});
+}));
 
-const styles = StyleSheet.create({
+const styles = sheet(() => ({
   wrap: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.border },
+  changes: { flexDirection: "row", alignItems: "center", gap: 5, height: 30, paddingHorizontal: 10, borderRadius: 15, borderWidth: 1, borderColor: c.border },
+  changesNum: { fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] },
   back: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
   backText: { color: c.text, fontSize: 30, marginTop: -4 },
   title: { color: c.text, fontSize: 16, fontWeight: "700" },
@@ -356,10 +397,10 @@ const styles = StyleSheet.create({
   edit: { fontSize: 14, marginVertical: 2 },
   editVerb: { color: c.muted, fontWeight: "600" },
   editFile: { color: c.text, fontFamily: c.mono, fontSize: 13 },
-  card: { marginVertical: 10, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: "#4c3d7a", backgroundColor: "#141120" },
+  card: { marginVertical: 10, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: alpha(c.accent, 0.4), backgroundColor: alpha(c.accent, 0.07) },
   cardTitle: { color: c.text, fontSize: 15, fontWeight: "700" },
   cardReason: { color: c.muted, fontSize: 13.5, marginTop: 4 },
-  cardCmd: { color: c.text, fontFamily: c.mono, fontSize: 12.5, backgroundColor: "#0b0b0d", padding: 10, borderRadius: 10, marginTop: 10, overflow: "hidden" },
+  cardCmd: { color: c.text, fontFamily: c.mono, fontSize: 12.5, backgroundColor: c.codeBg, padding: 10, borderRadius: 10, marginTop: 10, overflow: "hidden" },
   cardFile: { color: c.muted, fontFamily: c.mono, fontSize: 12.5, marginTop: 6 },
   cardActions: { flexDirection: "row", gap: 8, marginTop: 14 },
   approve: { flex: 1, height: 42, borderRadius: 12, backgroundColor: c.text, alignItems: "center", justifyContent: "center" },
@@ -371,4 +412,4 @@ const styles = StyleSheet.create({
   send: { width: 38, height: 38, borderRadius: 19, backgroundColor: c.text, alignItems: "center", justifyContent: "center" },
   sendIcon: { color: c.bg, fontSize: 20, fontWeight: "800", marginTop: -2 },
   stopIcon: { width: 12, height: 12, borderRadius: 3, backgroundColor: c.text },
-});
+}));

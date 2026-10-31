@@ -2,7 +2,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Client, parsePairing, type Server } from "../api";
-import { c } from "../theme";
+import { alpha, c, sheet } from "../theme";
 
 export function Pair({ onPaired }: { onPaired: (s: Server) => void }) {
   const [permission, requestPermission] = useCameraPermissions();
@@ -105,7 +105,7 @@ export function Pair({ onPaired }: { onPaired: (s: Server) => void }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = sheet(() => ({
   wrap: { flex: 1, padding: 24, justifyContent: "center" },
   mark: { width: 56, height: 56, borderRadius: 16, backgroundColor: c.raised, borderWidth: 1, borderColor: c.border, alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 18 },
   markText: { color: c.text, fontFamily: c.mono, fontSize: 18, fontWeight: "700" },
@@ -128,4 +128,4 @@ const styles = StyleSheet.create({
   scanHint: { position: "absolute", top: 80, left: 24, right: 24, color: "#fff", textAlign: "center", fontSize: 15, fontWeight: "600" },
   cancel: { position: "absolute", bottom: 60, paddingHorizontal: 28, paddingVertical: 12, borderRadius: 24, backgroundColor: "rgba(0,0,0,0.6)" },
   cancelText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-});
+}));

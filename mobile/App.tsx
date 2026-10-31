@@ -1,26 +1,28 @@
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
+import { AppState, BackHandler, Pressable, Text, useColorScheme, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Client, type Prefs, type Server } from "./src/api";
 import { Icon, type IconName } from "./src/Icon";
 import { APPROVAL, notify, onNotificationResponse, setupNotifications } from "./src/notify";
-import { loadPrefs } from "./src/prefs";
+import { loadAppearance, loadPrefs, saveAppearance } from "./src/prefs";
+import { Splash } from "./src/Splash";
 import { DEMO_SERVER, demoScene, installDemo } from "./src/demo";
 
 if (demoScene) installDemo();
+import { Changes } from "./src/screens/Changes";
 import { Chat } from "./src/screens/Chat";
 import { Chats } from "./src/screens/Chats";
 import { Pair } from "./src/screens/Pair";
 import { Settings } from "./src/screens/Settings";
 import { Usage } from "./src/screens/Usage";
-import { c } from "./src/theme";
+import { applyTheme, c, sheet, type Appearance } from "./src/theme";
 
 const KEY = "hrns.server";
 
 type Tab = "chats" | "usage" | "settings";
-type Route = { name: "list" } | { name: "chat"; id: string | null; cwd: string | null };
+type Route = { name: "list" } | { name: "chat"; id: string | null; cwd: string | null } | { name: "changes"; cwd: string; from: Route };
 
 export default function App() {
   const [server, setServer] = useState<Server | null | undefined>(demoScene ? DEMO_SERVER : undefined);
@@ -33,10 +35,27 @@ export default function App() {
   const [tab, setTab] = useState<Tab>(demoScene === "usage" || demoScene === "settings" ? demoScene : "chats");
   const [prefs, setPrefs] = useState<Prefs>({});
   const [accounts, setAccounts] = useState<{ id: string; email?: string | null }[]>([]);
+  const [look, setLook] = useState<Appearance | null>(null);
+  // The startup screen stays up long enough to play once, even when everything loads instantly.
+  const [intro, setIntro] = useState(!demoScene);
+  const system = useColorScheme();
 
   useEffect(() => {
     if (!demoScene) loadPrefs().then(setPrefs);
+    loadAppearance().then(setLook);
+    const t = setTimeout(() => setIntro(false), 1300);
+    return () => clearTimeout(t);
   }, []);
+
+  // Theme: "system" follows the phone. Changing it repaints the whole tree (see theme.ts).
+  const scheme = (look?.theme ?? "system") === "system" ? (system === "light" ? "light" : "dark") : look!.theme!;
+  // Idempotent; runs before children render so they read the new palette. The key remounts them.
+  applyTheme(scheme as "light" | "dark", look?.accent);
+  const themeKey = `${scheme}-${look?.accent ?? "violet"}`;
+  const updateLook = (a: Appearance) => {
+    setLook(a);
+    saveAppearance(a);
+  };
 
   useEffect(() => {
     if (demoScene) return;
@@ -73,7 +92,7 @@ export default function App() {
     }).catch(() => {});
     const off = client.on((e) => {
       if (e.type === "connection") setConnected(e.connected);
-      if (e.type === "resync") setRefreshKey((k) => k + 1);
+      if (e.type === "resync" || e.type === "thread-title") setRefreshKey((k) => k + 1);
       if (e.type === "notify") {
         notify(e.payload.title, e.payload.body, e.payload.threadId ? { threadId: e.payload.threadId } : {});
         return;
@@ -112,6 +131,10 @@ export default function App() {
 
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (route.name === "changes") {
+        setRoute(route.from);
+        return true;
+      }
       if (route.name === "chat") {
         setRoute({ name: "list" });
         return true;
@@ -137,23 +160,23 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" />
-      <SafeAreaView style={styles.root} edges={["top"]}>
-        {server === undefined ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={c.accent} />
-          </View>
+      <StatusBar style={c.scheme === "light" ? "dark" : "light"} />
+      <SafeAreaView key={themeKey} style={styles.root} edges={["top"]}>
+        {server === undefined || look === null || intro ? (
+          <Splash label={server === null ? "Starting" : "Connecting to your Mac"} />
         ) : !server || !client ? (
           <Pair onPaired={pair} />
         ) : route.name === "chat" ? (
-          <Chat key={route.id ?? "new"} client={client} threadId={route.id} cwd={route.cwd} prefs={prefs} onBack={() => setRoute({ name: "list" })} />
+          <Chat key={route.id ?? "new"} client={client} threadId={route.id} cwd={route.cwd} prefs={prefs} onBack={() => setRoute({ name: "list" })} onChanges={(cwd) => setRoute({ name: "changes", cwd, from: route })} />
+        ) : route.name === "changes" ? (
+          <Changes client={client} cwd={route.cwd} onBack={() => setRoute(route.from)} />
         ) : (
           <View style={{ flex: 1 }}>
             <View style={{ flex: 1 }}>
               {tab === "usage" ? (
                 <Usage client={client} accountLabel={accountLabel} />
               ) : tab === "settings" ? (
-                <Settings client={client} host={host} connected={connected} prefs={prefs} onPrefs={setPrefs} onUnpair={unpair} />
+                <Settings client={client} host={host} connected={connected} prefs={prefs} onPrefs={setPrefs} look={look} onLook={updateLook} onUnpair={unpair} />
               ) : (
           <Chats
             client={client}
@@ -204,12 +227,12 @@ function without(s: Set<string>, id: string) {
   return n;
 }
 
-const styles = StyleSheet.create({
+const styles = sheet(() => ({
   root: { flex: 1, backgroundColor: c.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  tabs: { flexDirection: "row", borderTopWidth: 1, borderTopColor: c.border, backgroundColor: "#0b0b0d" },
+  tabs: { flexDirection: "row", borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.tabBg },
   tab: { flex: 1, alignItems: "center", gap: 3, paddingTop: 0 },
   tabBar: { width: 22, height: 2.5, borderRadius: 2, marginBottom: 8, backgroundColor: "transparent" },
   tabLabel: { color: c.faint, fontSize: 11.5, fontWeight: "600" },
   tabDot: { position: "absolute", top: 8, right: "34%", width: 8, height: 8, borderRadius: 4, backgroundColor: c.amber },
-});
+}));

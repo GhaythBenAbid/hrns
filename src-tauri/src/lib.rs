@@ -246,7 +246,7 @@ pub fn run() {
 
             // Mirror chat events to paired phones.
             let remote = Remote::new(app.handle().clone(), &data);
-            for kind in ["chat", "rate-limits"] {
+            for kind in ["chat", "rate-limits", "thread-title"] {
                 let r = remote.clone();
                 app.listen_any(kind, move |e| r.publish(kind, e.payload()));
             }
