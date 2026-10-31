@@ -9,7 +9,7 @@
 Chat with OpenAI's Codex agent using your ChatGPT subscription, with a clean Codex/T3-style interface,
 multiple accounts, live command & diff views, and a usage dashboard.
 
-[Features](#features) · [Screenshots](#screenshots) · [Getting started](#getting-started) · [How it works](#how-it-works) · [Privacy](#privacy)
+**[Website](https://ghaythbenabid.github.io/hrns/)** · [Features](#features) · [Screenshots](#screenshots) · [Getting started](#getting-started) · [How it works](#how-it-works) · [Privacy](#privacy)
 
 </div>
 
