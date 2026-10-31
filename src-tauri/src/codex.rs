@@ -17,7 +17,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use crate::events::Events;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex};
@@ -159,7 +159,7 @@ struct State {
 }
 
 pub struct Codex {
-    app: AppHandle,
+    events: Events,
     store: Arc<Store>,
     /// hrns account id, and its CODEX_HOME (None = the user's default ~/.codex).
     account_id: String,
@@ -171,13 +171,13 @@ pub struct Codex {
 
 impl Codex {
     pub fn new(
-        app: AppHandle,
+        events: Events,
         store: Arc<Store>,
         ledger: Arc<UsageLedger>,
         account_id: String,
         home: Option<PathBuf>,
     ) -> Arc<Self> {
-        Arc::new(Self { app, store, account_id, home, ledger, conn: Mutex::new(None), state: StdMutex::new(State::default()) })
+        Arc::new(Self { events, store, account_id, home, ledger, conn: Mutex::new(None), state: StdMutex::new(State::default()) })
     }
 
     pub fn has_approval(&self, key: &str) -> bool {
@@ -402,7 +402,7 @@ impl Codex {
 
         let title = clean_title(&reply?).ok_or("The model returned no title")?;
         self.store.update(&local_id, |t| t.title = title.clone()).ok_or("Thread vanished")?;
-        let _ = self.app.emit("thread-title", json!({ "threadId": local_id, "title": title }));
+        self.events.emit("thread-title", json!({ "threadId": local_id, "title": title }));
         Ok(title)
     }
 
@@ -786,10 +786,10 @@ impl Codex {
                 }
             }
             "account/rateLimits/updated" => {
-                let _ = self.app.emit("rate-limits", json!({ "account": self.account_id, "rateLimits": p["rateLimits"] }));
+                self.events.emit("rate-limits", json!({ "account": self.account_id, "rateLimits": p["rateLimits"] }));
             }
             "account/updated" | "account/login/completed" => {
-                let _ = self.app.emit("account-changed", json!({ "account": self.account_id }));
+                self.events.emit("account-changed", json!({ "account": self.account_id }));
             }
             _ => {}
         }
@@ -852,7 +852,9 @@ impl Codex {
     }
 
     fn emit(&self, event: ChatEvent) {
-        let _ = self.app.emit("chat", event);
+        if let Ok(v) = serde_json::to_value(event) {
+            self.events.emit("chat", v);
+        }
     }
 }
 

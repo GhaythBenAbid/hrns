@@ -1,5 +1,6 @@
 mod accounts;
 mod codex;
+mod events;
 mod git;
 mod pricing;
 mod projects;
@@ -20,6 +21,15 @@ use terminal::Terminals;
 use usage::{Row, UsageLedger};
 
 type Acc<'a> = State<'a, Arc<Accounts>>;
+
+/// Core events go to the window as Tauri events (and from there to paired phones).
+struct WindowEvents(tauri::AppHandle);
+impl events::Sink for WindowEvents {
+    fn emit(&self, kind: &str, payload: Value) {
+        use tauri::Emitter;
+        let _ = self.0.emit(kind, payload);
+    }
+}
 
 #[tauri::command]
 fn list_threads(store: State<Arc<Store>>) -> Vec<Summary> {
@@ -277,7 +287,7 @@ pub fn run() {
             let store = Arc::new(Store::open(data.join("threads")));
             app.manage(Arc::new(Pricing::new(data.join("pricing.json"))));
             let ledger = Arc::new(UsageLedger::new(&data));
-            app.manage(Accounts::open(app.handle().clone(), store.clone(), ledger.clone(), data.join("accounts")));
+            app.manage(Accounts::open(Arc::new(WindowEvents(app.handle().clone())), store.clone(), ledger.clone(), data.join("accounts")));
             app.manage(ledger);
             app.manage(Terminals::new(app.handle().clone(), &data));
 

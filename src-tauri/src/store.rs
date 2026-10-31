@@ -163,30 +163,54 @@ fn default_access() -> String {
 pub struct Store {
     dir: PathBuf,
     threads: Mutex<HashMap<String, Thread>>,
+    /// Modified time of each file as last read or written, to notice changes made by another
+    /// hrns process (the desktop app and the CLI share this folder).
+    seen: Mutex<HashMap<String, std::time::SystemTime>>,
+}
+
+fn mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 impl Store {
     pub fn open(dir: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(&dir);
-        let mut threads = HashMap::new();
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                    continue;
-                }
-                if let Some(t) = std::fs::read(&path)
-                    .ok()
-                    .and_then(|b| serde_json::from_slice::<Thread>(&b).ok())
-                {
-                    threads.insert(t.id.clone(), t);
-                }
+        let store = Self { dir, threads: Mutex::new(HashMap::new()), seen: Mutex::new(HashMap::new()) };
+        store.sync();
+        store
+    }
+
+    /// Re-read files that changed on disk since we last saw them, and drop deleted ones.
+    /// One directory listing plus a stat per file; files are only parsed when they changed.
+    pub fn sync(&self) {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else { return };
+        let mut present = std::collections::HashSet::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else { continue };
+            present.insert(stem.clone());
+            let Some(m) = entry.metadata().and_then(|m| m.modified()).ok() else { continue };
+            if self.seen.lock().unwrap().get(&stem) == Some(&m) {
+                continue;
+            }
+            if let Some(t) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Thread>(&b).ok()) {
+                self.threads.lock().unwrap().insert(t.id.clone(), t);
+                self.seen.lock().unwrap().insert(stem, m);
             }
         }
-        Self { dir, threads: Mutex::new(threads) }
+        let mut seen = self.seen.lock().unwrap();
+        let gone: Vec<String> = seen.keys().filter(|k| !present.contains(*k)).cloned().collect();
+        for k in gone {
+            seen.remove(&k);
+            self.threads.lock().unwrap().remove(&k);
+        }
     }
 
     pub fn list(&self) -> Vec<Summary> {
+        self.sync();
         let threads = self.threads.lock().unwrap();
         let mut out: Vec<Summary> = threads
             .values()
@@ -229,8 +253,11 @@ impl Store {
         let path = self.path(&thread.id);
         let tmp = path.with_extension("json.tmp");
         if let Ok(bytes) = serde_json::to_vec(thread) {
-            if std::fs::write(&tmp, bytes).is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
+            if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, &path).is_ok() {
+                // Our own write isn't a change to re-read.
+                if let (Some(stem), Some(m)) = (path.file_stem().and_then(|s| s.to_str()), mtime(&path)) {
+                    self.seen.lock().unwrap().insert(stem.to_owned(), m);
+                }
             }
         }
     }

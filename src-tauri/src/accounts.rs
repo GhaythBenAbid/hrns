@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::AppHandle;
+use crate::events::Events;
 
 pub const DEFAULT: &str = "default";
 
@@ -30,7 +30,7 @@ pub struct AccountEntry {
 }
 
 pub struct Accounts {
-    app: AppHandle,
+    events: Events,
     store: Arc<Store>,
     ledger: Arc<UsageLedger>,
     dir: PathBuf,
@@ -39,7 +39,7 @@ pub struct Accounts {
 }
 
 impl Accounts {
-    pub fn open(app: AppHandle, store: Arc<Store>, ledger: Arc<UsageLedger>, dir: PathBuf) -> Arc<Self> {
+    pub fn open(events: Events, store: Arc<Store>, ledger: Arc<UsageLedger>, dir: PathBuf) -> Arc<Self> {
         let mut entries: Vec<AccountEntry> = std::fs::read(dir.join("accounts.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
@@ -47,7 +47,7 @@ impl Accounts {
         if !entries.iter().any(|e| e.id == DEFAULT) {
             entries.insert(0, AccountEntry { id: DEFAULT.into(), email: None, plan: None });
         }
-        Arc::new(Self { app, store, ledger, dir, entries: Mutex::new(entries), engines: Mutex::new(HashMap::new()) })
+        Arc::new(Self { events, store, ledger, dir, entries: Mutex::new(entries), engines: Mutex::new(HashMap::new()) })
     }
 
     pub fn list(&self) -> Vec<AccountEntry> {
@@ -71,7 +71,7 @@ impl Accounts {
         if let Some(h) = &home {
             link_shared_config(h);
         }
-        let engine = Codex::new(self.app.clone(), self.store.clone(), self.ledger.clone(), id.to_owned(), home);
+        let engine = Codex::new(self.events.clone(), self.store.clone(), self.ledger.clone(), id.to_owned(), home);
         engines.insert(id.to_owned(), engine.clone());
         Ok(engine)
     }
