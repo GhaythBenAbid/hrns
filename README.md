@@ -68,6 +68,8 @@ If you aren't signed in to Codex yet, hrns shows a **Sign in with ChatGPT** butt
 
 ### Phone app (remote control)
 
+![hrns mobile app: chats, a chat with steps and diffs, an approval, and usage](docs/screenshots/mobile.png)
+
 The phone app lives in [`mobile/`](mobile) and connects to hrns on your Mac over [Tailscale](https://tailscale.com).
 
 1. Install Tailscale on your **Mac and phone**, and sign in to the same tailnet on both.

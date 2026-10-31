@@ -41,7 +41,9 @@ export function Chats({ client, host, connected, streaming, waiting, onOpen, onN
   }, [load, refreshKey]);
 
   useEffect(() => {
-    Promise.all([notificationsEnabled(), SecureStore.getItemAsync(DISMISSED)]).then(([on, dismissed]) => setAskNotify(!on && !dismissed));
+    Promise.all([notificationsEnabled(), SecureStore.getItemAsync(DISMISSED)])
+      .then(([on, dismissed]) => setAskNotify(!on && !dismissed))
+      .catch(() => {});
   }, []);
 
   const sections = useMemo(() => {
@@ -125,7 +127,7 @@ export function Chats({ client, host, connected, streaming, waiting, onOpen, onN
                     : t.failed ? <Icon name="x" size={15} color={c.danger} strokeWidth={2.2} />
                     : <Icon name="chat" size={15} color={c.faint} />}
                 </View>
-                <View style={{ flex: 1, gap: 5 }}>
+                <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
                   <View style={styles.row1}>
                     <Text style={styles.title} numberOfLines={1}>{t.title}</Text>
                     <Text style={styles.ago}>{ago(t.updatedAt)}</Text>

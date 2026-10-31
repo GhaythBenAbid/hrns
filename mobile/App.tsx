@@ -7,6 +7,9 @@ import { Client, type Prefs, type Server } from "./src/api";
 import { Icon, type IconName } from "./src/Icon";
 import { APPROVAL, notify, onNotificationResponse, setupNotifications } from "./src/notify";
 import { loadPrefs } from "./src/prefs";
+import { DEMO_SERVER, demoScene, installDemo } from "./src/demo";
+
+if (demoScene) installDemo();
 import { Chat } from "./src/screens/Chat";
 import { Chats } from "./src/screens/Chats";
 import { Pair } from "./src/screens/Pair";
@@ -20,22 +23,23 @@ type Tab = "chats" | "usage" | "settings";
 type Route = { name: "list" } | { name: "chat"; id: string | null; cwd: string | null };
 
 export default function App() {
-  const [server, setServer] = useState<Server | null | undefined>(undefined);
-  const [route, setRoute] = useState<Route>({ name: "list" });
+  const [server, setServer] = useState<Server | null | undefined>(demoScene ? DEMO_SERVER : undefined);
+  const [route, setRoute] = useState<Route>(demoScene?.startsWith("chat-") ? { name: "chat", id: demoScene.slice(5), cwd: null } : { name: "list" });
   const [connected, setConnected] = useState(false);
   const [host, setHost] = useState("your Mac");
   const [streaming, setStreaming] = useState<Set<string>>(new Set());
   const [waiting, setWaiting] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
-  const [tab, setTab] = useState<Tab>("chats");
+  const [tab, setTab] = useState<Tab>(demoScene === "usage" || demoScene === "settings" ? demoScene : "chats");
   const [prefs, setPrefs] = useState<Prefs>({});
   const [accounts, setAccounts] = useState<{ id: string; email?: string | null }[]>([]);
 
   useEffect(() => {
-    loadPrefs().then(setPrefs);
+    if (!demoScene) loadPrefs().then(setPrefs);
   }, []);
 
   useEffect(() => {
+    if (demoScene) return;
     SecureStore.getItemAsync(KEY).then((s) => setServer(s ? JSON.parse(s) : null));
   }, []);
 
@@ -46,7 +50,7 @@ export default function App() {
 
   // Approve / Deny straight from the notification, or tap to open the chat.
   useEffect(() => {
-    if (!client) return;
+    if (!client || demoScene) return;
     setupNotifications();
     const sub = onNotificationResponse((r) => {
       const data = r.notification.request.content.data as Record<string, string>;
