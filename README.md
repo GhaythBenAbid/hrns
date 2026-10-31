@@ -28,6 +28,7 @@ multiple accounts, live command & diff views, and a usage dashboard.
 - **Usage dashboard.** Daily cost and tokens, by source, model and day, with cache savings. It covers hrns chats *and* your Codex CLI/IDE/app sessions.
 - **Rich session list.** Chats are grouped by project, each showing its status, a preview, the model, `+/−` lines, tokens and an estimated cost. Click a chat's badges for a details menu.
 - **Model & reasoning picker,** loaded live from Codex.
+- **Remote control from your phone.** A companion React Native (Expo) app connects over **Tailscale**. You can browse every chat, watch Codex work live, send prompts, stop turns, approve commands, start new chats, and check usage and account limits. Approvals and finished turns also show up as notifications, with **Approve / Deny** buttons.
 
 ## Screenshots
 
@@ -64,6 +65,24 @@ bun tauri build      # optimized .app + .dmg in src-tauri/target/release/bundle
 ```
 
 If you aren't signed in to Codex yet, hrns shows a **Sign in with ChatGPT** button. You can add more accounts later in **Settings → Accounts**.
+
+### Phone app (remote control)
+
+The phone app lives in [`mobile/`](mobile) and connects to hrns on your Mac over [Tailscale](https://tailscale.com).
+
+1. Install Tailscale on your **Mac and phone**, and sign in to the same tailnet on both.
+2. In hrns, open **Settings → Remote** and turn it on. A pairing QR code appears.
+3. Run the app with Expo:
+   ```sh
+   cd mobile
+   npm install
+   REACT_NATIVE_PACKAGER_HOSTNAME=$(tailscale ip -4) npx expo start --lan
+   ```
+4. Scan Expo's QR code with **Expo Go**, then tap **Scan pairing code** in the app and point it at the QR code in hrns.
+
+**Security:** the remote server listens **only on your Tailscale address** (never on `0.0.0.0` and never through Funnel). Every request needs the pairing token, which the phone keeps in the system keystore. Use **Reset** in Settings → Remote to unpair every phone.
+
+<sub>Expo Go shows notifications while the app is open or recently in the background. Push notifications that reach a closed app need a development build with Firebase.</sub>
 
 ### Keyboard shortcuts
 
@@ -122,13 +141,19 @@ src-tauri/src/
   accounts.rs        multiple ChatGPT accounts (one CODEX_HOME each)
   usage.rs           usage ledger + incremental transcript scanner (with tests)
   pricing.rs         models.dev price cache
+  remote.rs          Tailscale-only HTTP + WebSocket API for the phone app
   store.rs           local chat history
+mobile/              React Native (Expo) remote-control app
+  App.tsx            pairing, live connection, tabs, notifications
+  src/screens/       Pair · Chats · Chat · Usage · Settings
 ```
 
 Run the Rust tests with `cd src-tauri && cargo test`.
 
 ## Roadmap
 
+- [x] Phone remote control over Tailscale
+- [ ] Push notifications when the phone app is closed (dev build + FCM)
 - [ ] opencode as a second engine (any provider/model)
 - [ ] Move a chat to another account mid-conversation
 - [ ] Image attachments

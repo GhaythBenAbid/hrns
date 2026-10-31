@@ -1,12 +1,15 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
+  import { invoke } from "@tauri-apps/api/core";
+  import QRCode from "qrcode";
   import { app, type Access } from "./store.svelte";
 
   const sections = [
     { id: "general", label: "General", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" },
     { id: "models", label: "Models", icon: "M12 2 2 7l10 5 10-5ZM2 17l10 5 10-5M2 12l10 5 10-5" },
     { id: "permissions", label: "Permissions", icon: "M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6Z" },
+    { id: "remote", label: "Remote", icon: "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2ZM11 18h2" },
     { id: "account", label: "Account", icon: "M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" },
     { id: "about", label: "About", icon: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 16v-4M12 8h.01" },
   ] as const;
@@ -15,6 +18,39 @@
   const section = $derived(app.settingsSection as Section);
   let version = $state("");
   getVersion().then((v) => (version = v)).catch(() => {});
+
+  type RemoteInfo = { enabled: boolean; running: boolean; url: string | null; token: string; pairUrl: string | null };
+  let remote = $state<RemoteInfo | null>(null);
+  let remoteBusy = $state(false);
+  let remoteError = $state<string | null>(null);
+  let qr = $state("");
+  let showToken = $state(false);
+  let testResult = $state<string | null>(null);
+  async function testNotify() {
+    const phones = await invoke<number>("remote_test_notify");
+    testResult = phones ? `Sent to ${phones} phone${phones > 1 ? "s" : ""}.` : "No phone is connected right now.";
+    setTimeout(() => (testResult = null), 4000);
+  }
+
+  async function remoteCall(cmd: string) {
+    remoteBusy = true;
+    remoteError = null;
+    try {
+      remote = await invoke<RemoteInfo>(cmd);
+    } catch (e) {
+      remoteError = String(e);
+    } finally {
+      remoteBusy = false;
+    }
+  }
+  $effect(() => {
+    if (section === "remote") untrack(() => remoteCall("remote_info"));
+  });
+  $effect(() => {
+    const url = remote?.pairUrl;
+    if (!url) return void (qr = "");
+    QRCode.toString(url, { type: "svg", margin: 1, color: { dark: "#0b0b0d", light: "#ffffff" } }).then((s) => (qr = s));
+  });
 
   // Refresh usage when the Accounts page opens (untracked: refreshing updates app.accounts).
   $effect(() => {
@@ -142,6 +178,49 @@
           {/each}
         </div>
 
+      {:else if section === "remote"}
+        <h1>Remote</h1>
+        <p class="lead">Control your chats from your phone over Tailscale: see every chat, follow it live, send messages and approve commands. Only devices on your tailnet can reach it, and each request needs the pairing token.</p>
+
+        <div class="group">
+          <div class="row">
+            <div class="text">
+              <div class="label">Remote access {#if remote?.running}<span class="tag live">On</span>{/if}</div>
+              <div class="hint">{remote?.running ? `Listening on ${remote.url} (Tailscale only)` : "Off — nothing is listening."}</div>
+            </div>
+            {#if remote?.running}
+              <button class="btn" disabled={remoteBusy} onclick={() => remoteCall("remote_disable")}>Turn off</button>
+            {:else}
+              <button class="btn primary" disabled={remoteBusy} onclick={() => remoteCall("remote_enable")}>{remoteBusy ? "Starting…" : "Turn on"}</button>
+            {/if}
+          </div>
+        </div>
+        {#if remoteError}<div class="remote-err">{remoteError}</div>{/if}
+
+        {#if remote?.running && qr}
+          <div class="pair">
+            <div class="qr">{@html qr}</div>
+            <div class="pair-text">
+              <div class="label">Pair your phone</div>
+              <ol>
+                <li>Install <b>Tailscale</b> on your phone and sign in to the same tailnet.</li>
+                <li>Open the <b>hrns</b> mobile app and tap <b>Scan pairing code</b>.</li>
+                <li>Point it at this QR code.</li>
+              </ol>
+              <div class="hint mono">{remote.url}</div>
+              <div class="token-row">
+                <code class="token">{showToken ? remote.token : "•".repeat(24)}</code>
+                <button class="btn small" onclick={() => (showToken = !showToken)}>{showToken ? "Hide" : "Show"} token</button>
+                <button class="btn small danger" onclick={() => remoteCall("remote_rotate")} title="Unpairs every phone">Reset</button>
+              </div>
+              <div class="token-row">
+                <button class="btn small" onclick={testNotify}>Send test notification</button>
+                {#if testResult}<span class="hint">{testResult}</span>{/if}
+              </div>
+            </div>
+          </div>
+        {/if}
+
       {:else if section === "account"}
         <h1>Accounts</h1>
         <p class="lead">Connect several ChatGPT accounts. New chats use the selected account; each chat stays on the account it started with.</p>
@@ -260,6 +339,18 @@
 
   .who { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
   .accounts { display: grid; gap: 10px; }
+  .tag.live { color: #4ade80; background: rgb(74 222 128 / 0.12); }
+  .remote-err { margin-top: 10px; color: var(--danger); font-size: 13px; }
+  .pair { margin-top: 16px; display: flex; gap: 24px; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
+  .qr { flex: none; width: 196px; height: 196px; padding: 8px; border-radius: 12px; background: #fff; }
+  .qr :global(svg) { width: 100%; height: 100%; display: block; }
+  .pair-text { min-width: 0; flex: 1; }
+  .pair-text ol { margin: 10px 0 14px; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+  .pair-text b { color: var(--text); font-weight: 550; }
+  .mono { font-family: var(--mono); }
+  .token-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .token { font: 11.5px var(--mono); color: var(--muted); background: var(--raised); padding: 5px 8px; border-radius: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .btn.small { height: 28px; padding: 0 10px; font-size: 12px; }
   .acard { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
   .acard.active { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
   .btns { flex: none; display: flex; gap: 6px; }

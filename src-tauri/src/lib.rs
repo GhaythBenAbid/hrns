@@ -1,6 +1,7 @@
 mod accounts;
 mod codex;
 mod pricing;
+mod remote;
 mod store;
 mod usage;
 
@@ -10,7 +11,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use store::{Store, Summary, Thread};
-use tauri::{Manager, State};
+use remote::Remote;
+use tauri::{Listener, Manager, State};
 use usage::{Row, UsageLedger};
 
 type Acc<'a> = State<'a, Arc<Accounts>>;
@@ -160,6 +162,32 @@ async fn logout(accounts: Acc<'_>, account: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn remote_info(remote: State<Arc<Remote>>) -> Value {
+    remote.info()
+}
+
+#[tauri::command]
+async fn remote_enable(remote: State<'_, Arc<Remote>>) -> Result<Value, String> {
+    remote.inner().start().await
+}
+
+#[tauri::command]
+fn remote_disable(remote: State<Arc<Remote>>) -> Value {
+    remote.disable()
+}
+
+/// Returns how many phones are connected and received it.
+#[tauri::command]
+fn remote_test_notify(remote: State<Arc<Remote>>) -> usize {
+    remote.notify("hrns", "Notifications are working. You'll hear from Codex here.")
+}
+
+#[tauri::command]
+async fn remote_rotate(remote: State<'_, Arc<Remote>>) -> Result<Value, String> {
+    remote.inner().rotate().await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -172,6 +200,20 @@ pub fn run() {
             let ledger = Arc::new(UsageLedger::new(&data));
             app.manage(Accounts::open(app.handle().clone(), store.clone(), ledger.clone(), data.join("accounts")));
             app.manage(ledger);
+
+            // Mirror chat events to paired phones.
+            let remote = Remote::new(app.handle().clone(), &data);
+            for kind in ["chat", "rate-limits"] {
+                let r = remote.clone();
+                app.listen_any(kind, move |e| r.publish(kind, e.payload()));
+            }
+            if remote.should_autostart() {
+                let r = remote.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = r.start().await;
+                });
+            }
+            app.manage(remote);
             app.manage(store);
             Ok(())
         })
@@ -192,7 +234,12 @@ pub fn run() {
             add_account,
             remove_account,
             login,
-            logout
+            logout,
+            remote_info,
+            remote_enable,
+            remote_disable,
+            remote_rotate,
+            remote_test_notify
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

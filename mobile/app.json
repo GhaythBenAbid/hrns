@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "hrns",
+    "slug": "hrns",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.hrns.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#08080a",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "dev.hrns.mobile"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan the pairing code shown in hrns on your Mac.",
+          "recordAudioAndroid": false
+        }
+      ]
+    ],
+    "scheme": "hrns",
+    "backgroundColor": "#08080a"
+  }
+}
