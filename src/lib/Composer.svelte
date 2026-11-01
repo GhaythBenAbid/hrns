@@ -20,7 +20,10 @@
   $effect(() => {
     if (!pane.current) app.loadRepo(app.folder);
   });
-  const newInWorktree = $derived(!pane.current && !!app.repo && app.workspace === "worktree");
+  // Compare mode needs a git project: each model works in its own worktree.
+  const canCompare = $derived(!pane.current && !!app.repo && !!app.base);
+  const comparing = $derived(canCompare ? app.compare.filter((id) => id !== app.model) : []);
+  const newInWorktree = $derived(!pane.current && !!app.repo && (app.workspace === "worktree" || comparing.length > 0));
   const shortBranch = (b: string) => b.replace(/^hrns\//, "");
   const folderName = $derived(folder ? folder.split("/").filter(Boolean).pop() : null);
 
@@ -89,16 +92,27 @@
     <div class="pick model">
       <button class="pill" title={app.currentModel?.displayName} onclick={(e) => toggle(e, "model")}>
         <span class="lbl">{app.currentModel?.displayName ?? "Select model"}</span>
+        {#if comparing.length}<span class="plus" title="Also runs on {comparing.map((id) => app.modelName(id)).join(', ')}">+{comparing.length}</span>{/if}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {#if menu === "model"}
         <div class="menu" role="menu" tabindex="-1" style:max-height="{menuMax}px" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+          {#if canCompare}
+            <div class="cmp-hint">Add models with <b>Compare</b> to send the same message to each, every one in its own worktree from <code>{app.base}</code>.</div>
+          {/if}
           {#each app.models as m (m.id)}
-            <button class="opt" class:sel={m.id === app.model} onclick={() => { app.setModel(m.id); menu = null; }}>
-              <div class="name">{m.displayName}</div>
-              <div class="desc">{m.description}</div>
-              {#if m.id === app.model}<svg class="check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="m5 12 5 5 9-10" /></svg>{/if}
-            </button>
+            <div class="mrow">
+              <button class="opt" class:sel={m.id === app.model} onclick={() => { app.setModel(m.id); menu = null; }}>
+                <div class="name">{m.displayName}</div>
+                <div class="desc">{m.description}</div>
+                {#if m.id === app.model}<svg class="check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="m5 12 5 5 9-10" /></svg>{/if}
+              </button>
+              {#if canCompare && m.id !== app.model}
+                <button class="cmp" class:on={app.compare.includes(m.id)} title="Also send to {m.displayName}" onclick={() => app.toggleCompare(m.id)}>
+                  {app.compare.includes(m.id) ? "✓ Compare" : "+ Compare"}
+                </button>
+              {/if}
+            </div>
           {/each}
         </div>
       {/if}
@@ -246,6 +260,18 @@
   }
   .menu.small { width: 280px; }
   .menu.right { left: auto; right: 0; }
+  .mrow { position: relative; }
+  .mrow .opt { padding-right: 96px; }
+  .mrow .check { right: 10px; }
+  .cmp {
+    position: absolute; right: 8px; top: 9px; height: 22px; padding: 0 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; color: var(--faint); border: 1px solid var(--border); background: var(--panel);
+  }
+  .cmp:hover { color: var(--text); background: var(--hover); }
+  .cmp.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+  .cmp-hint { font-size: 12px; color: var(--muted); padding: 6px 10px 8px; line-height: 1.45; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .cmp-hint code { font: 11.5px var(--mono); }
+  .plus { flex: none; font-size: 11px; font-weight: 700; color: var(--accent); }
   .sep { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); padding: 10px 10px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
   .pad { padding: 0 10px 6px; }
   .branch-opt { padding-top: 6px; padding-bottom: 6px; }

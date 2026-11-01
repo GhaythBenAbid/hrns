@@ -81,6 +81,9 @@ fn slug(text: &str) -> String {
 
 /// Create a worktree of the repo at `project` on a new branch from `base`.
 pub fn create(data: &Path, project: &str, base: &str, hint: &str) -> Result<(PathBuf, Worktree), String> {
+    // Chats started together (compare mode) would otherwise race for the same name.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let info = info(project).ok_or("This project isn't a git repository with commits")?;
     let root = PathBuf::from(&info.root);
     let repo = root.file_name().and_then(|n| n.to_str()).unwrap_or("repo");

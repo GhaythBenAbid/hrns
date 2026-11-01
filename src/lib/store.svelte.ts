@@ -184,6 +184,8 @@ class AppState {
   /** Git info of `folder` (null when it isn't a repo), and the branch a new worktree starts from. */
   repo = $state.raw<RepoInfo | null>(null);
   base = $state<string | null>(null);
+  /** Extra models that get the same first message, each in its own worktree (compare mode). */
+  compare = $state<string[]>([]);
   /** Open project finder; resolves the pending `pickFolder()` call. */
   finder = $state.raw<{ resolve: (dir: string | null) => void } | null>(null);
   /** Project folders found on disk (scanned each time the finder opens). */
@@ -469,6 +471,32 @@ class AppState {
     }
   }
 
+  toggleCompare(id: string) {
+    this.compare = this.compare.includes(id) ? this.compare.filter((m) => m !== id) : [...this.compare, id];
+  }
+
+  /** One extra chat of a comparison: same message, another model, its own worktree. */
+  private async sendExtra(text: string, model: string, base: string): Promise<string | null> {
+    const id = crypto.randomUUID();
+    const m = this.models.find((x) => x.id === model);
+    const effort = this.effort && m?.supportedReasoningEfforts.some((e) => e.reasoningEffort === this.effort) ? this.effort : null;
+    buffers.set(id, { ...emptyLive(), notice: `Creating a worktree from ${base}…` });
+    this.streaming[id] = true;
+    try {
+      await invoke<Thread>("send_message", {
+        threadId: id, text, model, effort, access: this.access, cwd: this.folder, account: this.activeAccount, worktree: base,
+      });
+      await this.refreshThreads();
+      this.nameThread(id);
+      return id;
+    } catch (e) {
+      delete this.streaming[id];
+      buffers.delete(id);
+      this.error = `${this.modelName(model)}: ${e}`;
+      return null;
+    }
+  }
+
   setWorkspace(w: "local" | "worktree", base?: string) {
     this.workspace = w;
     save("hrns.workspace", w);
@@ -629,8 +657,18 @@ class AppState {
     } else {
       pane.current = { id, title: text.slice(0, 48), model: this.model, effort: this.effort, access: this.access, cwd: this.folder, createdAt: now, updatedAt: now, messages: [userMsg] };
     }
+    // Compare mode: the same message to other models too, every chat in its own worktree.
+    const extras = isNew && this.repo && this.base ? this.compare.filter((m) => m !== this.model && this.models.some((x) => x.id === m)) : [];
     // New chat in a new worktree of a git project, branched from `base`.
-    const base = isNew && this.workspace === "worktree" && this.repo && this.base ? this.base : null;
+    const base = isNew && (this.workspace === "worktree" || extras.length > 0) && this.repo && this.base ? this.base : null;
+    if (extras.length && base) {
+      this.compare = [];
+      Promise.all(extras.map((m) => this.sendExtra(text, m, base))).then((ids) => {
+        // Two models: show them side by side.
+        const other = ids.find(Boolean);
+        if (ids.length === 1 && other && this.panes.length === 1) this.openSplit(other, "right");
+      });
+    }
     const live = emptyLive();
     if (base) live.notice = `Creating a worktree from ${base}…`;
     buffers.set(id, live);
