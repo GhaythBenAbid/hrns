@@ -242,7 +242,7 @@
         >
           {#if newInWorktree}
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10M18 9c0 4-6 3-11.5 8" /></svg>
-            <span class="lbl hide-sm">Worktree · {app.base}</span>
+            <span class="lbl hide-sm wt">{app.base}</span>
           {:else}
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M3 9h18" /></svg>
             <span class="lbl hide-sm">Local</span>
@@ -356,6 +356,7 @@
   .branch-opt .name { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
   .tag { font-family: inherit; font-size: 10.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
   .pill.on { color: var(--accent); }
+  .wt { font: 12.5px var(--mono); max-width: 120px; }
   .branch { flex: 0 1 auto; max-width: 180px; cursor: default; }
   .opt { position: relative; width: 100%; text-align: left; padding: 8px 30px 8px 10px; border-radius: 9px; display: block; }
   .opt:hover { background: var(--hover); }
