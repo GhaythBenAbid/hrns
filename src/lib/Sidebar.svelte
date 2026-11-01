@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, type Summary } from "./store.svelte";
+  import { app, projectOf, type Summary } from "./store.svelte";
   import { drag, startDrag } from "./drag.svelte";
   import ProjectIcon from "./ProjectIcon.svelte";
   import AnimatedTitle from "./AnimatedTitle.svelte";
@@ -39,7 +39,8 @@
     if (app.folder && !q) map.set(app.folder, []);
     for (const t of app.threads) {
       if (q && !t.title.toLowerCase().includes(q) && !t.preview.toLowerCase().includes(q)) continue;
-      const key = t.cwd ?? "";
+      // Chats in a worktree belong to their project.
+      const key = projectOf(t) ?? "";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(t);
     }
@@ -169,6 +170,12 @@
             </button>
             <button class="meta" class:on={stats?.id === t.id} title="Usage details" onclick={(e) => showStats(e, t.id)}>
               <span class="chip model">{shortModel(t.model)}</span>
+              {#if t.worktree}
+                <span class="chip branch" title="Worktree on {t.worktree.branch} (from {t.worktree.base})">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10M18 9c0 4-6 3-11.5 8" /></svg>
+                  <span class="bname">{t.worktree.branch.replace(/^hrns\//, "")}</span>
+                </span>
+              {/if}
               {#if t.files}
                 <span class="chip diff"><span class="add">+{t.additions}</span><span class="del-n">−{t.deletions}</span></span>
               {/if}
@@ -405,6 +412,8 @@
   }
   .card.active .chip { background: var(--hover); }
   .chip.model { color: color-mix(in srgb, var(--accent) 75%, var(--muted)); }
+  .chip.branch { gap: 4px; min-width: 0; flex: 0 1 auto; }
+  .chip.branch .bname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px; font-family: var(--mono); font-size: 0.95em; }
 
   .del {
     position: absolute; right: 6px; top: 7px;

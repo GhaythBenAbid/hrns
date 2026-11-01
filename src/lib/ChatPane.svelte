@@ -2,7 +2,7 @@
   import { tick, untrack } from "svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { invoke } from "@tauri-apps/api/core";
-  import { app, type Pane } from "./store.svelte";
+  import { app, projectOf, type Pane } from "./store.svelte";
   import Composer from "./Composer.svelte";
   import MessageView from "./MessageView.svelte";
   import ProjectIcon from "./ProjectIcon.svelte";
@@ -33,7 +33,7 @@
 
   const folderName = $derived(app.folder?.split("/").filter(Boolean).pop() ?? "");
   const folderParent = $derived(app.folder ? app.folder.replace(/\/[^/]+\/?$/, "").replace(/^\/Users\/[^/]+/, "~") : "");
-  const recent = $derived(app.folder ? app.threads.filter((t) => t.cwd === app.folder).slice(0, 3) : []);
+  const recent = $derived(app.folder ? app.threads.filter((t) => projectOf(t) === app.folder).slice(0, 3) : []);
   let branch = $state<string | null>(null);
   $effect(() => {
     const dir = app.folder;
@@ -198,7 +198,7 @@
   .close:hover { opacity: 1; }
 
   .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
-  .thread { max-width: 780px; min-width: 0; margin: 0 auto; padding: 8px 28px 40px; }
+  .thread { max-width: var(--thread-max, 780px); min-width: 0; margin: 0 auto; padding: 8px 28px 40px; }
   .split .thread { padding-left: 20px; padding-right: 20px; }
 
   .hero {
@@ -255,7 +255,7 @@
   .recent-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: color-mix(in srgb, var(--text) 85%, transparent); }
   .recent-ago { flex: none; font-size: 12px; color: var(--faint); }
 
-  .dock { flex: none; width: 100%; max-width: 820px; margin: 0 auto; padding: 0 20px 10px; }
+  .dock { flex: none; width: 100%; max-width: var(--dock-max, 820px); margin: 0 auto; padding: 0 20px 10px; }
   .split .dock { padding: 0 14px 10px; }
   .hint { text-align: center; font-size: 11.5px; color: var(--faint); padding-top: 8px; }
 </style>

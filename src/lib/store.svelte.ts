@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, message } from "@tauri-apps/plugin-dialog";
 
 export type Part =
   | { type: "text" | "reasoning" | "plan"; id: string; text: string }
@@ -53,6 +53,11 @@ export const accents = {
 export type AccentPreset = keyof typeof accents;
 export type Font = keyof typeof fonts;
 export type Project = { path: string; modified: number };
+/** A chat's own git worktree: `cwd` is its folder, `root` the project's main checkout. */
+export type Worktree = { root: string; branch: string; base: string };
+export type RepoInfo = { root: string; current: string | null; branches: string[] };
+/** The project a chat belongs to (its main checkout, for chats in a worktree). */
+export const projectOf = (t: { cwd?: string | null; worktree?: Worktree | null }) => t.worktree?.root ?? t.cwd ?? null;
 export type MonoFont = keyof typeof monoFonts;
 
 export type Message = {
@@ -72,6 +77,7 @@ export type Thread = {
   effort?: string | null;
   access: Access;
   cwd?: string | null;
+  worktree?: Worktree | null;
   account?: string | null;
   createdAt: number;
   updatedAt: number;
@@ -85,6 +91,7 @@ export type Summary = {
   id: string;
   title: string;
   cwd?: string | null;
+  worktree?: Worktree | null;
   account?: string | null;
   model: string;
   preview: string;
@@ -172,6 +179,11 @@ class AppState {
   access = $state<Access>((saved("hrns.access") as Access) ?? "auto");
   /** Project folder for the next new chat. */
   folder = $state<string | null>(saved("hrns.folder"));
+  /** Where the next new chat works: in the project folder, or in a new worktree of it. */
+  workspace = $state<"local" | "worktree">(saved("hrns.workspace") === "worktree" ? "worktree" : "local");
+  /** Git info of `folder` (null when it isn't a repo), and the branch a new worktree starts from. */
+  repo = $state.raw<RepoInfo | null>(null);
+  base = $state<string | null>(null);
   /** Open project finder; resolves the pending `pickFolder()` call. */
   finder = $state.raw<{ resolve: (dir: string | null) => void } | null>(null);
   /** Project folders found on disk (scanned each time the finder opens). */
@@ -192,6 +204,8 @@ class AppState {
   sidebarOpen = $state(saved("hrns.sidebar") !== "0");
   view = $state<"chat" | "settings" | "usage">("chat");
   settingsSection = $state("general");
+  /** Chat column: a readable centered column, or the full width of the pane. */
+  chatWidth = $state<"default" | "full">(saved("hrns.chatWidth") === "full" ? "full" : "default");
   textSize = $state<"small" | "default" | "large">((saved("hrns.textSize") as "small" | "default" | "large") ?? "default");
   theme = $state<Theme>((saved("hrns.theme") as Theme) ?? "system");
   /** A preset name or a custom "#rrggbb". */
@@ -455,6 +469,24 @@ class AppState {
     }
   }
 
+  setWorkspace(w: "local" | "worktree", base?: string) {
+    this.workspace = w;
+    save("hrns.workspace", w);
+    if (base) this.base = base;
+  }
+
+  /** Branches of the selected project, for the worktree picker. */
+  async loadRepo(dir = this.folder) {
+    let info: RepoInfo | null = null;
+    try {
+      if (dir) info = await invoke<RepoInfo | null>("repo_info", { path: dir });
+    } catch {}
+    if (dir !== this.folder) return;
+    this.repo = info;
+    if (!info) this.base = null;
+    else if (!this.base || !info.branches.includes(this.base)) this.base = info.current ?? info.branches[0] ?? null;
+  }
+
   newChatIn(dir: string) {
     this.folder = dir;
     save("hrns.folder", dir);
@@ -464,6 +496,11 @@ class AppState {
   async respond(key: string, decision: "accept" | "acceptForSession" | "decline" | "cancel") {
     for (const p of this.panes) if (p.live) p.live.approvals = p.live.approvals.filter((a) => a.key !== key);
     await invoke("respond_approval", { key, decision });
+  }
+
+  setChatWidth(w: "default" | "full") {
+    this.chatWidth = w;
+    save("hrns.chatWidth", w);
   }
 
   setTextSize(size: "small" | "default" | "large") {
@@ -544,7 +581,29 @@ class AppState {
   }
 
   async remove(id: string) {
-    await invoke("delete_thread", { id });
+    const s = this.threads.find((t) => t.id === id);
+    let removeWorktree = false;
+    if (s?.worktree) {
+      const others = this.threads.some((t) => t.id !== id && t.cwd === s.cwd);
+      const c = others ? null : await invoke<{ exists: boolean; dirty: number; ahead: number } | null>("worktree_check", { id }).catch(() => null);
+      if (c?.exists) {
+        const lose = [
+          c.dirty && `${c.dirty} uncommitted file${c.dirty > 1 ? "s" : ""} will be lost`,
+          c.ahead && `branch ${s.worktree.branch} has ${c.ahead} commit${c.ahead > 1 ? "s" : ""} not on ${s.worktree.base} and will be kept`,
+        ].filter(Boolean);
+        const answer = await message(
+          `This chat works in its own worktree on ${s.worktree.branch}.` + (lose.length ? `\n\nIf you remove it: ${lose.join("; ")}.` : ""),
+          { title: `Delete “${s.title}”?`, kind: "warning", buttons: { yes: "Delete chat and worktree", no: "Delete chat only", cancel: "Cancel" } },
+        );
+        if (answer === "Cancel" || answer === "cancel") return;
+        removeWorktree = answer === "Yes" || answer === "Delete chat and worktree";
+      }
+    }
+    try {
+      await invoke("delete_thread", { id, removeWorktree });
+    } catch (e) {
+      this.error = String(e);
+    }
     this.threads = this.threads.filter((t) => t.id !== id);
     buffers.delete(id);
     delete this.streaming[id];
@@ -570,15 +629,24 @@ class AppState {
     } else {
       pane.current = { id, title: text.slice(0, 48), model: this.model, effort: this.effort, access: this.access, cwd: this.folder, createdAt: now, updatedAt: now, messages: [userMsg] };
     }
-    buffers.set(id, emptyLive());
+    // New chat in a new worktree of a git project, branched from `base`.
+    const base = isNew && this.workspace === "worktree" && this.repo && this.base ? this.base : null;
+    const live = emptyLive();
+    if (base) live.notice = `Creating a worktree from ${base}…`;
+    buffers.set(id, live);
     this.streaming[id] = true;
-    pane.live = emptyLive();
+    pane.live = { ...live };
 
     try {
       const thread = await invoke<Thread>("send_message", {
         threadId: id, text, model: this.model, effort: this.effort, access: this.access, cwd: pane.current?.cwd ?? this.folder,
-        account: this.activeAccount,
+        account: this.activeAccount, worktree: base,
       });
+      for (const p of this.panes) {
+        if (p.current?.id !== id) continue;
+        p.current.cwd = thread.cwd;
+        p.current.worktree = thread.worktree;
+      }
       this.refreshThreads();
       if (isNew) this.nameThread(id);
     } catch (e) {

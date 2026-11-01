@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { app, type Pane } from "./store.svelte";
+  import { app, projectOf, type Pane } from "./store.svelte";
   import ProjectIcon from "./ProjectIcon.svelte";
 
   let { pane, autofocus = false }: { pane: Pane; autofocus?: boolean } = $props();
   let text = $state("");
   let box: HTMLTextAreaElement;
-  let menu = $state<"model" | "effort" | "access" | null>(null);
+  let menu = $state<"model" | "effort" | "access" | "workspace" | null>(null);
 
   const accessModes = [
     { id: "read-only", label: "Read only", desc: "Codex can read files. Asks before editing or running commands." },
@@ -13,13 +13,32 @@
     { id: "full", label: "Full access", desc: "Can edit anything and use the network without asking. Use with care." },
   ] as const;
   const accessLabel = $derived(accessModes.find((m) => m.id === app.access)?.label ?? "Auto");
-  // Existing chats keep their folder; new chats use the selected one.
-  const folder = $derived(pane.current ? pane.current.cwd : app.folder);
+  // Existing chats keep their folder (their project, for chats in a worktree); new chats use the selected one.
+  const folder = $derived(pane.current ? projectOf(pane.current) : app.folder);
+  const wt = $derived(pane.current?.worktree);
+  // New chats in a git project choose where to work; refresh its branches when the project changes.
+  $effect(() => {
+    if (!pane.current) app.loadRepo(app.folder);
+  });
+  const newInWorktree = $derived(!pane.current && !!app.repo && app.workspace === "worktree");
+  const shortBranch = (b: string) => b.replace(/^hrns\//, "");
   const folderName = $derived(folder ? folder.split("/").filter(Boolean).pop() : null);
 
   const streaming = $derived(!!pane.current && !!app.streaming[pane.current.id]);
   const efforts = $derived(app.currentModel?.supportedReasoningEfforts ?? []);
   const effortLabel = $derived(app.effort ?? app.currentModel?.defaultReasoningEffort ?? "default");
+
+  // Menus open upward: cap their height to the room above the composer so none is cut off under the top bar.
+  let menuMax = $state(380);
+  function toggle(e: MouseEvent, which: NonNullable<typeof menu>) {
+    e.stopPropagation();
+    if (menu === which) return (menu = null);
+    const btn = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const paneTop = Math.max(0, box?.closest(".pane")?.getBoundingClientRect().top ?? 0);
+    // 52px: the window's title bar area (traffic lights, header buttons); 8px: gap above the button.
+    menuMax = Math.max(160, Math.min(380, btn.top - paneTop - 52 - 8 - 8));
+    menu = which;
+  }
 
   export function focus() {
     box?.focus();
@@ -68,12 +87,12 @@
 
   <div class="row">
     <div class="pick model">
-      <button class="pill" title={app.currentModel?.displayName} onclick={(e) => { e.stopPropagation(); menu = menu === "model" ? null : "model"; }}>
+      <button class="pill" title={app.currentModel?.displayName} onclick={(e) => toggle(e, "model")}>
         <span class="lbl">{app.currentModel?.displayName ?? "Select model"}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {#if menu === "model"}
-        <div class="menu" role="menu" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+        <div class="menu" role="menu" tabindex="-1" style:max-height="{menuMax}px" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
           {#each app.models as m (m.id)}
             <button class="opt" class:sel={m.id === app.model} onclick={() => { app.setModel(m.id); menu = null; }}>
               <div class="name">{m.displayName}</div>
@@ -87,13 +106,13 @@
 
     {#if efforts.length}
       <div class="pick">
-        <button class="pill" title="Reasoning: {effortLabel}" onclick={(e) => { e.stopPropagation(); menu = menu === "effort" ? null : "effort"; }}>
+        <button class="pill" title="Reasoning: {effortLabel}" onclick={(e) => toggle(e, "effort")}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3ZM9 21h6" /></svg>
           <span class="cap lbl hide-sm">{effortLabel}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
         </button>
         {#if menu === "effort"}
-          <div class="menu small" role="menu" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+          <div class="menu small" role="menu" tabindex="-1" style:max-height="{menuMax}px" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
             {#each efforts as e (e.reasoningEffort)}
               <button class="opt" class:sel={e.reasoningEffort === effortLabel} onclick={() => { app.setEffort(e.reasoningEffort); menu = null; }}>
                 <div class="name cap">{e.reasoningEffort}</div>
@@ -106,13 +125,13 @@
     {/if}
 
     <div class="pick">
-      <button class="pill" class:full={app.access === "full"} title="Access: {accessLabel}" onclick={(e) => { e.stopPropagation(); menu = menu === "access" ? null : "access"; }}>
+      <button class="pill" class:full={app.access === "full"} title="Access: {accessLabel}" onclick={(e) => toggle(e, "access")}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6Z" /></svg>
         <span class="lbl hide-sm">{accessLabel}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {#if menu === "access"}
-        <div class="menu" role="menu" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+        <div class="menu" role="menu" tabindex="-1" style:max-height="{menuMax}px" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
           {#each accessModes as m (m.id)}
             <button class="opt" class:sel={m.id === app.access} onclick={() => { app.setAccess(m.id); menu = null; }}>
               <div class="name">{m.label}</div>
@@ -124,6 +143,46 @@
     </div>
 
     <div class="spacer"></div>
+
+    {#if wt}
+      <span class="pill branch" title="Works in its own worktree on {wt.branch}, branched from {wt.base}">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10M18 9c0 4-6 3-11.5 8" /></svg>
+        <span class="lbl hide-sm">{shortBranch(wt.branch)}</span>
+      </span>
+    {:else if !pane.current && app.repo}
+      <div class="pick">
+        <button
+          class="pill"
+          class:on={newInWorktree}
+          title={newInWorktree ? `New worktree from ${app.base}: its own folder and branch, so other chats' edits don't collide` : "Works directly in the project folder"}
+          onclick={(e) => toggle(e, "workspace")}
+        >
+          {#if newInWorktree}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10M18 9c0 4-6 3-11.5 8" /></svg>
+            <span class="lbl hide-sm">Worktree · {app.base}</span>
+          {:else}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M3 9h18" /></svg>
+            <span class="lbl hide-sm">Local</span>
+          {/if}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6" /></svg>
+        </button>
+        {#if menu === "workspace"}
+          <div class="menu right" role="menu" tabindex="-1" style:max-height="{menuMax}px" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+            <button class="opt" class:sel={app.workspace === "local"} onclick={() => { app.setWorkspace("local"); menu = null; }}>
+              <div class="name">Local</div>
+              <div class="desc">Work in the project folder{app.repo.current ? `, on ${app.repo.current}` : ""}.</div>
+            </button>
+            <div class="sep">New worktree from</div>
+            <div class="desc pad">Its own folder and branch, so chats running side by side never edit the same files.</div>
+            {#each app.repo.branches as b (b)}
+              <button class="opt branch-opt" class:sel={app.workspace === "worktree" && app.base === b} onclick={() => { app.setWorkspace("worktree", b); menu = null; }}>
+                <div class="name">{b}{#if b === app.repo.current}<span class="tag">current</span>{/if}</div>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <button
       class="pill folder"
@@ -186,6 +245,14 @@
     box-shadow: 0 16px 40px rgb(0 0 0 / 0.35);
   }
   .menu.small { width: 280px; }
+  .menu.right { left: auto; right: 0; }
+  .sep { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); padding: 10px 10px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
+  .pad { padding: 0 10px 6px; }
+  .branch-opt { padding-top: 6px; padding-bottom: 6px; }
+  .branch-opt .name { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .tag { font-family: inherit; font-size: 10.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+  .pill.on { color: var(--accent); }
+  .branch { flex: 0 1 auto; max-width: 180px; cursor: default; }
   .opt { position: relative; width: 100%; text-align: left; padding: 8px 30px 8px 10px; border-radius: 9px; display: block; }
   .opt:hover { background: var(--hover); }
   .opt.sel .name { color: var(--accent); }

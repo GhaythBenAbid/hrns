@@ -343,7 +343,7 @@ async fn send(State(ctx): State<Ctx>, Json(b): Json<SendBody>) -> Response {
     let effort = b.effort.or_else(|| existing.as_ref().and_then(|t| t.effort.clone()));
     let access = b.access.or_else(|| existing.as_ref().map(|t| t.access.clone())).unwrap_or_else(|| "auto".into());
     let thread_id = b.thread_id.or_else(|| Some(uuid::Uuid::new_v4().to_string()));
-    match engine.send(thread_id, b.text, model, effort, access, b.cwd).await {
+    match engine.send(thread_id, b.text, model, effort, access, b.cwd, None).await {
         Ok(t) => Json(json!(t)).into_response(),
         Err(e) => err(e),
     }

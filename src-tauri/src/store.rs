@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+pub use crate::worktree::Worktree;
+
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -66,6 +68,9 @@ pub struct Thread {
     /// ChatGPT account (hrns account id) this chat runs on; None = default.
     #[serde(default)]
     pub account: Option<String>,
+    /// Set when the chat runs in its own git worktree (`cwd` is then the worktree folder).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<Worktree>,
     /// Token usage per model, so cost can be priced per model.
     #[serde(default)]
     pub usage: HashMap<String, Usage>,
@@ -80,6 +85,7 @@ pub struct Summary {
     pub id: String,
     pub title: String,
     pub cwd: Option<String>,
+    pub worktree: Option<Worktree>,
     pub account: Option<String>,
     pub model: String,
     /// Start of the latest reply (or user message), for the sidebar.
@@ -123,6 +129,7 @@ impl Summary {
             id: t.id.clone(),
             title: t.title.clone(),
             cwd: t.cwd.clone(),
+            worktree: t.worktree.clone(),
             account: t.account.clone(),
             model: t.model.clone(),
             preview: preview_src.chars().take(220).collect(),

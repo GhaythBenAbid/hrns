@@ -183,6 +183,16 @@
               {/each}
             </div>
           </div>
+          <div class="row">
+            <div class="text">
+              <div class="label">Chat width</div>
+              <div class="hint">A centered column that's easy to read, or the full width of the window.</div>
+            </div>
+            <div class="seg">
+              <button class:sel={app.chatWidth === "default"} onclick={() => app.setChatWidth("default")}>Centered</button>
+              <button class:sel={app.chatWidth === "full"} onclick={() => app.setChatWidth("full")}>Full width</button>
+            </div>
+          </div>
         </div>
 
         <h2>Interface font</h2>

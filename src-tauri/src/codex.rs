@@ -243,6 +243,7 @@ impl Codex {
         effort: Option<String>,
         access: String,
         cwd: Option<String>,
+        worktree: Option<crate::worktree::Worktree>,
     ) -> Result<Thread, String> {
         let account = (self.account_id != "default").then(|| self.account_id.clone());
         let text = text.trim().to_owned();
@@ -264,6 +265,7 @@ impl Codex {
                 access: access.clone(),
                 cwd: Some(cwd),
                 account,
+                worktree,
                 usage: Default::default(),
                 created_at: now,
                 updated_at: now,

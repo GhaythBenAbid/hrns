@@ -7,6 +7,7 @@ mod remote;
 mod store;
 mod terminal;
 mod usage;
+mod worktree;
 
 use accounts::{AccountEntry, Accounts};
 use pricing::{Price, Pricing};
@@ -124,20 +125,37 @@ fn rename_thread(store: State<Arc<Store>>, id: String, title: String) {
     store.update(&id, |t| t.title = title);
 }
 
+/// With `remove_worktree`, also removes the chat's worktree (unless another chat uses it).
+/// Returns the branch name when it was kept because it has unmerged commits.
 #[tauri::command]
-async fn delete_thread(store: State<'_, Arc<Store>>, accounts: Acc<'_>, id: String) -> Result<(), String> {
-    if let Some(engine) = store.get(&id).and_then(|t| accounts.engine_for(&t).ok()) {
+async fn delete_thread(
+    store: State<'_, Arc<Store>>,
+    accounts: Acc<'_>,
+    id: String,
+    remove_worktree: Option<bool>,
+) -> Result<Option<String>, String> {
+    let thread = store.get(&id);
+    if let Some(engine) = thread.as_ref().and_then(|t| accounts.engine_for(t).ok()) {
         let _ = engine.stop(&id).await;
         engine.forget(&id);
     }
     store.delete(&id);
-    Ok(())
+    let Some(Thread { worktree: Some(wt), cwd: Some(cwd), .. }) = thread else { return Ok(None) };
+    let shared = store.list().iter().any(|s| s.cwd.as_deref() == Some(&cwd));
+    if remove_worktree != Some(true) || shared {
+        return Ok(None);
+    }
+    let branch = wt.branch.clone();
+    let kept = tauri::async_runtime::spawn_blocking(move || worktree::remove(&cwd, &wt)).await.map_err(|e| e.to_string())??;
+    Ok(kept.then_some(branch))
 }
 
 /// Existing chats stay on their own account; new chats use `account`.
+/// A new chat with `worktree` set (a base branch) first gets its own worktree of the project.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn send_message(
+    app: tauri::AppHandle,
     store: State<'_, Arc<Store>>,
     accounts: Acc<'_>,
     thread_id: Option<String>,
@@ -147,13 +165,45 @@ async fn send_message(
     access: String,
     cwd: Option<String>,
     account: String,
+    worktree: Option<String>,
 ) -> Result<Thread, String> {
     let existing = thread_id.as_deref().and_then(|id| store.get(id));
     let engine = match &existing {
         Some(t) => accounts.engine_for(t)?,
         None => accounts.engine(&account)?,
     };
-    engine.send(thread_id, text, model, effort, access, cwd).await
+    let (cwd, wt) = match (&existing, worktree, cwd) {
+        (None, Some(base), Some(project)) => {
+            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let hint = text.clone();
+            let (path, wt) = tauri::async_runtime::spawn_blocking(move || worktree::create(&data, &project, &base, &hint))
+                .await
+                .map_err(|e| e.to_string())??;
+            (Some(path.to_string_lossy().into_owned()), Some(wt))
+        }
+        (_, _, cwd) => (cwd, None),
+    };
+    let created = wt.clone().zip(cwd.clone());
+    let r = engine.send(thread_id, text, model, effort, access, cwd, wt).await;
+    if let (Err(_), Some((wt, path))) = (&r, created) {
+        // The chat never started: don't leave an empty worktree behind.
+        let _ = tauri::async_runtime::spawn_blocking(move || worktree::remove(&path, &wt)).await;
+    }
+    r
+}
+
+/// Whether a folder is a git repo, and its branches (for the new-chat worktree picker).
+#[tauri::command]
+async fn repo_info(path: String) -> Result<Option<worktree::RepoInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || worktree::info(&path)).await.map_err(|e| e.to_string())
+}
+
+/// What deleting a chat's worktree would throw away (uncommitted files, unmerged commits).
+#[tauri::command]
+async fn worktree_check(store: State<'_, Arc<Store>>, id: String) -> Result<Option<worktree::Check>, String> {
+    let Some(t) = store.get(&id) else { return Ok(None) };
+    let (Some(wt), Some(cwd)) = (t.worktree, t.cwd) else { return Ok(None) };
+    tauri::async_runtime::spawn_blocking(move || Some(worktree::check(&cwd, &wt))).await.map_err(|e| e.to_string())
 }
 
 /// Have `model` name a chat from its first message (runs on the chat's own account).
@@ -303,6 +353,8 @@ pub fn run() {
             git_branch,
             git_status,
             git_file_diff,
+            repo_info,
+            worktree_check,
             find_projects,
             project_icon,
             term_list,

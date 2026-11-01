@@ -21,6 +21,11 @@
     document.documentElement.style.setProperty("--scale", String(scales[app.textSize]));
   });
   $effect(() => {
+    const full = app.chatWidth === "full";
+    document.documentElement.style.setProperty("--thread-max", full ? "100%" : "780px");
+    document.documentElement.style.setProperty("--dock-max", full ? "100%" : "820px");
+  });
+  $effect(() => {
     const root = document.documentElement.style;
     root.setProperty("--font", fonts[app.font].stack);
     root.setProperty("--mono", monoFonts[app.monoFont].stack);
