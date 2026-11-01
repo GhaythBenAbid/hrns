@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, message } from "@tauri-apps/plugin-dialog";
 
 export type Part =
   | { type: "text" | "reasoning" | "plan"; id: string; text: string }
@@ -23,6 +23,43 @@ export type Approval = {
 
 export type Access = "read-only" | "auto" | "full";
 
+export type Theme = "system" | "light" | "dark";
+
+/** Interface and code fonts. Only faces that ship with macOS, so every choice renders. */
+export const fonts = {
+  system: { label: "System", stack: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif' },
+  rounded: { label: "Rounded", stack: 'ui-rounded, "SF Pro Rounded", -apple-system, sans-serif' },
+  serif: { label: "New York", stack: 'ui-serif, "New York", Georgia, serif' },
+  avenir: { label: "Avenir Next", stack: '"Avenir Next", Avenir, -apple-system, sans-serif' },
+  helvetica: { label: "Helvetica", stack: '"Helvetica Neue", Helvetica, Arial, sans-serif' },
+} as const;
+export const monoFonts = {
+  sf: { label: "SF Mono", stack: 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace' },
+  menlo: { label: "Menlo", stack: "Menlo, ui-monospace, monospace" },
+  monaco: { label: "Monaco", stack: "Monaco, ui-monospace, monospace" },
+  courier: { label: "Courier", stack: '"Courier New", Courier, monospace' },
+} as const;
+/** Accent presets, each tuned per theme (lighter on dark, deeper on light). Custom colors are "#rrggbb". */
+export const accents = {
+  violet: { label: "Violet", dark: "#a78bfa", light: "#7c3aed" },
+  blue: { label: "Blue", dark: "#60a5fa", light: "#2563eb" },
+  teal: { label: "Teal", dark: "#2dd4bf", light: "#0d9488" },
+  green: { label: "Green", dark: "#4ade80", light: "#16a34a" },
+  amber: { label: "Amber", dark: "#fbbf24", light: "#d97706" },
+  orange: { label: "Orange", dark: "#fb923c", light: "#ea580c" },
+  rose: { label: "Rose", dark: "#fb7185", light: "#e11d48" },
+  pink: { label: "Pink", dark: "#f472b6", light: "#db2777" },
+} as const;
+export type AccentPreset = keyof typeof accents;
+export type Font = keyof typeof fonts;
+export type Project = { path: string; modified: number };
+/** A chat's own git worktree: `cwd` is its folder, `root` the project's main checkout. */
+export type Worktree = { root: string; branch: string; base: string };
+export type RepoInfo = { root: string; current: string | null; branches: string[] };
+/** The project a chat belongs to (its main checkout, for chats in a worktree). */
+export const projectOf = (t: { cwd?: string | null; worktree?: Worktree | null }) => t.worktree?.root ?? t.cwd ?? null;
+export type MonoFont = keyof typeof monoFonts;
+
 export type Message = {
   id: string;
   role: "user" | "assistant";
@@ -30,6 +67,8 @@ export type Message = {
   parts?: Part[];
   model?: string;
   error?: string;
+  /** Files attached to a user message (absolute paths). */
+  attachments?: string[];
   createdAt: number;
 };
 
@@ -40,6 +79,7 @@ export type Thread = {
   effort?: string | null;
   access: Access;
   cwd?: string | null;
+  worktree?: Worktree | null;
   account?: string | null;
   createdAt: number;
   updatedAt: number;
@@ -53,6 +93,7 @@ export type Summary = {
   id: string;
   title: string;
   cwd?: string | null;
+  worktree?: Worktree | null;
   account?: string | null;
   model: string;
   preview: string;
@@ -112,20 +153,46 @@ const buffers = new Map<string, Live>();
 const FLUSH_MS = 60;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** One chat column. The window shows one, or two side by side (split view). */
+export class Pane {
+  current = $state<Thread | null>(null);
+  live = $state<Live | null>(null);
+}
+
 class AppState {
   ready = $state(false);
   threads = $state<Summary[]>([]);
-  current = $state<Thread | null>(null);
-  live = $state<Live | null>(null);
+  panes = $state<Pane[]>([new Pane()]);
+  /** Index of the pane that the sidebar, shortcuts and settings act on. */
+  focused = $state(0);
+  /** Width of the left pane in split view, as a fraction of the main area. */
+  splitRatio = $state(Number(saved("hrns.split")) || 0.5);
+  /** The changes sidebar (uncommitted git changes of the focused pane's project). */
+  diffOpen = $state(saved("hrns.diffOpen") === "1");
+  diffWidth = $state(Number(saved("hrns.diffWidth")) || 440);
   streaming = $state<Record<string, true>>({});
   /** Threads with an approval waiting on the user. */
   waiting = $state<Record<string, true>>({});
   models = $state<Model[]>([]);
   model = $state<string>(saved("hrns.model") ?? "");
   effort = $state<string | null>(saved("hrns.effort"));
+  /** Who names new chats: "auto" (a fast model), "off" (first line of the message), or a model id. */
+  titleModel = $state<string>(saved("hrns.titleModel") ?? "auto");
   access = $state<Access>((saved("hrns.access") as Access) ?? "auto");
   /** Project folder for the next new chat. */
   folder = $state<string | null>(saved("hrns.folder"));
+  /** Where the next new chat works: in the project folder, or in a new worktree of it. */
+  workspace = $state<"local" | "worktree">(saved("hrns.workspace") === "worktree" ? "worktree" : "local");
+  /** Git info of `folder` (null when it isn't a repo), and the branch a new worktree starts from. */
+  repo = $state.raw<RepoInfo | null>(null);
+  base = $state<string | null>(null);
+  /** Extra models that get the same first message, each in its own worktree (compare mode). */
+  compare = $state<string[]>([]);
+  /** Open project finder; resolves the pending `pickFolder()` call. */
+  finder = $state.raw<{ resolve: (dir: string | null) => void } | null>(null);
+  /** Project folders found on disk (scanned each time the finder opens). */
+  projects = $state.raw<Project[]>([]);
+  scanning = $state(false);
   /** Signed-in identity + usage of the active account. */
   account = $state<Account>(null);
   rateLimits = $state<RateLimits>(null);
@@ -141,7 +208,87 @@ class AppState {
   sidebarOpen = $state(saved("hrns.sidebar") !== "0");
   view = $state<"chat" | "settings" | "usage">("chat");
   settingsSection = $state("general");
+  /** Chat column: a readable centered column, or the full width of the pane. */
+  chatWidth = $state<"default" | "full">(saved("hrns.chatWidth") === "full" ? "full" : "default");
   textSize = $state<"small" | "default" | "large">((saved("hrns.textSize") as "small" | "default" | "large") ?? "default");
+  theme = $state<Theme>((saved("hrns.theme") as Theme) ?? "system");
+  /** A preset name or a custom "#rrggbb". */
+  accent = $state<string>(saved("hrns.accent") ?? "violet");
+  font = $state<Font>((saved("hrns.font") as Font) in fonts ? (saved("hrns.font") as Font) : "system");
+  monoFont = $state<MonoFont>((saved("hrns.monoFont") as MonoFont) in monoFonts ? (saved("hrns.monoFont") as MonoFont) : "sf");
+
+  get pane(): Pane {
+    return this.panes[this.focused] ?? this.panes[0];
+  }
+  get current() {
+    return this.pane.current;
+  }
+  set current(t: Thread | null) {
+    this.pane.current = t;
+  }
+  get live() {
+    return this.pane.live;
+  }
+  set live(l: Live | null) {
+    this.pane.live = l;
+  }
+
+  /** Whether a thread is showing in any pane. */
+  isOpen(id: string) {
+    return this.panes.some((p) => p.current?.id === id);
+  }
+
+  focus(pane: Pane) {
+    const i = this.panes.indexOf(pane);
+    if (i < 0 || i === this.focused) return;
+    this.focused = i;
+    if (pane.current) this.access = pane.current.access ?? "auto";
+  }
+
+  /** Open a thread beside the current one (or into a side of an existing split). */
+  async openSplit(id: string, side: "left" | "right") {
+    this.view = "chat";
+    if (this.panes.length === 1) {
+      if (this.panes[0].current?.id === id) return;
+      const pane = new Pane();
+      this.panes = side === "left" ? [pane, this.panes[0]] : [this.panes[0], pane];
+      this.focused = this.panes.indexOf(pane);
+      await this.open(id, pane);
+      return;
+    }
+    const target = this.panes[side === "left" ? 0 : 1];
+    const other = this.panes[side === "left" ? 1 : 0];
+    if (other.current?.id === id) {
+      // Dropped onto the opposite side: swap the two chats.
+      this.panes = [this.panes[1], this.panes[0]];
+      this.focused = this.panes.indexOf(other);
+      return;
+    }
+    this.focus(target);
+    await this.open(id, target);
+  }
+
+  closePane(pane: Pane) {
+    if (this.panes.length < 2) return;
+    this.panes = this.panes.filter((p) => p !== pane);
+    this.focused = 0;
+    if (this.current) this.access = this.current.access ?? "auto";
+  }
+
+  setDiffOpen(open: boolean) {
+    this.diffOpen = open;
+    save("hrns.diffOpen", open ? "1" : "0");
+  }
+
+  setDiffWidth(w: number) {
+    this.diffWidth = Math.round(Math.min(900, Math.max(300, w)));
+    save("hrns.diffWidth", String(this.diffWidth));
+  }
+
+  setSplitRatio(r: number) {
+    this.splitRatio = Math.min(0.75, Math.max(0.25, r));
+    save("hrns.split", String(this.splitRatio));
+  }
 
   get currentModel(): Model | undefined {
     return this.models.find((m) => m.id === this.model);
@@ -149,6 +296,11 @@ class AppState {
 
   async init() {
     listen<ChatEvent>("chat", (e) => this.onChat(e.payload));
+    listen<{ threadId: string; title: string }>("thread-title", ({ payload: { threadId, title } }) => {
+      for (const p of this.panes) if (p.current?.id === threadId) p.current.title = title;
+      const s = this.threads.find((t) => t.id === threadId);
+      if (s) s.title = title;
+    });
     listen<{ account: string; rateLimits: RateLimits }>("rate-limits", ({ payload: { account, rateLimits } }) => {
       this.statuses[account] = { account: this.statuses[account]?.account ?? null, rateLimits };
       if (account === this.activeAccount) this.rateLimits = rateLimits;
@@ -251,17 +403,118 @@ class AppState {
     save("hrns.effort", effort);
   }
 
+  setTitleModel(id: string) {
+    this.titleModel = id;
+    save("hrns.titleModel", id);
+  }
+
+  /** The model that names chats, or null when naming is off. "auto" prefers a small, fast model. */
+  get titleNamer(): Model | null {
+    if (this.titleModel === "off") return null;
+    return (
+      this.models.find((m) => m.id === this.titleModel) ??
+      this.models.find((m) => /mini|nano|spark|flash|lite/i.test(m.id)) ??
+      this.currentModel ??
+      null
+    );
+  }
+
+  /** Ask the naming model for a title; the result arrives as a `thread-title` event. */
+  async nameThread(id: string) {
+    const m = this.titleNamer;
+    if (!m) return;
+    // Naming needs no thinking: use the lightest effort the model offers.
+    const effort = ["none", "minimal", "low"].find((e) => m.supportedReasoningEfforts.some((s) => s.reasoningEffort === e)) ?? null;
+    try {
+      await invoke("generate_title", { threadId: id, model: m.id, effort });
+    } catch {
+      // Keep the first-line title.
+    }
+  }
+
   setAccess(access: Access) {
     this.access = access;
     save("hrns.access", access);
   }
 
-  async pickFolder(): Promise<string | null> {
+  /** Opens the project finder; resolves with the chosen folder (also made the default), or null. */
+  pickFolder(): Promise<string | null> {
+    this.finder?.resolve(null);
+    this.scanProjects();
+    return new Promise((resolve) => {
+      const finder = {
+        resolve: (dir: string | null) => {
+          if (this.finder === finder) this.finder = null;
+          if (dir) {
+            this.folder = dir;
+            save("hrns.folder", dir);
+          }
+          resolve(dir);
+        },
+      };
+      this.finder = finder;
+    });
+  }
+
+  /** The native folder dialog, for folders the finder doesn't know about. */
+  async browseFolder(): Promise<string | null> {
     const dir = await openDialog({ directory: true, defaultPath: this.folder ?? undefined, title: "Choose a project folder" });
-    if (typeof dir !== "string") return null;
-    this.folder = dir;
-    save("hrns.folder", dir);
-    return dir;
+    return typeof dir === "string" ? dir : null;
+  }
+
+  async scanProjects() {
+    if (this.scanning) return;
+    this.scanning = true;
+    try {
+      this.projects = await invoke<Project[]>("find_projects");
+    } catch {
+    } finally {
+      this.scanning = false;
+    }
+  }
+
+  toggleCompare(id: string) {
+    this.compare = this.compare.includes(id) ? this.compare.filter((m) => m !== id) : [...this.compare, id];
+  }
+
+  /** One extra chat of a comparison: same message, another model, its own worktree. */
+  private async sendExtra(text: string, model: string, base: string, attachments: string[]): Promise<string | null> {
+    const id = crypto.randomUUID();
+    const m = this.models.find((x) => x.id === model);
+    const effort = this.effort && m?.supportedReasoningEfforts.some((e) => e.reasoningEffort === this.effort) ? this.effort : null;
+    buffers.set(id, { ...emptyLive(), notice: `Creating a worktree from ${base}…` });
+    this.streaming[id] = true;
+    try {
+      await invoke<Thread>("send_message", {
+        threadId: id, text, model, effort, access: this.access, cwd: this.folder, account: this.activeAccount, worktree: base, attachments,
+      });
+      await this.refreshThreads();
+      this.nameThread(id);
+      return id;
+    } catch (e) {
+      delete this.streaming[id];
+      buffers.delete(id);
+      this.error = `${this.modelName(model)}: ${e}`;
+      return null;
+    }
+  }
+
+  setWorkspace(w: "local" | "worktree", base?: string) {
+    this.workspace = w;
+    save("hrns.workspace", w);
+    if (base) this.base = base;
+  }
+
+  /** Branches of the selected project, for the worktree picker. */
+  async loadRepo(dir = this.folder) {
+    let info: RepoInfo | null = null;
+    try {
+      if (dir) info = await invoke<RepoInfo | null>("repo_info", { path: dir });
+    } catch {}
+    if (dir !== this.folder) return;
+    this.repo = info;
+    if (!info) this.base = null;
+    else if (!this.base || !info.branches.includes(this.base)) this.base = info.current ?? info.branches[0] ?? null;
   }
 
   newChatIn(dir: string) {
@@ -271,13 +524,38 @@ class AppState {
   }
 
   async respond(key: string, decision: "accept" | "acceptForSession" | "decline" | "cancel") {
-    if (this.live) this.live.approvals = this.live.approvals.filter((a) => a.key !== key);
+    for (const p of this.panes) if (p.live) p.live.approvals = p.live.approvals.filter((a) => a.key !== key);
     await invoke("respond_approval", { key, decision });
+  }
+
+  setChatWidth(w: "default" | "full") {
+    this.chatWidth = w;
+    save("hrns.chatWidth", w);
   }
 
   setTextSize(size: "small" | "default" | "large") {
     this.textSize = size;
     save("hrns.textSize", size);
+  }
+
+  setTheme(theme: Theme) {
+    this.theme = theme;
+    save("hrns.theme", theme);
+  }
+
+  setFont(font: Font) {
+    this.font = font;
+    save("hrns.font", font);
+  }
+
+  setAccent(accent: string) {
+    this.accent = accent;
+    save("hrns.accent", accent);
+  }
+
+  setMonoFont(font: MonoFont) {
+    this.monoFont = font;
+    save("hrns.monoFont", font);
   }
 
   openSettings(section?: string) {
@@ -317,57 +595,108 @@ class AppState {
     this.live = null;
   }
 
-  async open(id: string) {
+  async open(id: string, pane = this.pane) {
     this.view = "chat";
-    if (this.current?.id === id) return;
+    if (pane.current?.id === id) return;
+    // Already showing in the other pane: just move focus there.
+    const shown = this.panes.find((p) => p !== pane && p.current?.id === id);
+    if (shown) return this.focus(shown);
     const r = await invoke<[Thread, Live | null] | null>("get_thread", { id });
     if (!r) return;
     const [thread, live] = r;
-    this.current = thread;
-    this.access = thread.access ?? "auto";
+    pane.current = thread;
+    if (pane === this.pane) this.access = thread.access ?? "auto";
     if (live) buffers.set(id, live);
-    this.live = live;
+    pane.live = live;
   }
 
   async remove(id: string) {
-    await invoke("delete_thread", { id });
+    const s = this.threads.find((t) => t.id === id);
+    let removeWorktree = false;
+    if (s?.worktree) {
+      const others = this.threads.some((t) => t.id !== id && t.cwd === s.cwd);
+      const c = others ? null : await invoke<{ exists: boolean; dirty: number; ahead: number } | null>("worktree_check", { id }).catch(() => null);
+      if (c?.exists) {
+        const lose = [
+          c.dirty && `${c.dirty} uncommitted file${c.dirty > 1 ? "s" : ""} will be lost`,
+          c.ahead && `branch ${s.worktree.branch} has ${c.ahead} commit${c.ahead > 1 ? "s" : ""} not on ${s.worktree.base} and will be kept`,
+        ].filter(Boolean);
+        const answer = await message(
+          `This chat works in its own worktree on ${s.worktree.branch}.` + (lose.length ? `\n\nIf you remove it: ${lose.join("; ")}.` : ""),
+          { title: `Delete “${s.title}”?`, kind: "warning", buttons: { yes: "Delete chat and worktree", no: "Delete chat only", cancel: "Cancel" } },
+        );
+        if (answer === "Cancel" || answer === "cancel") return;
+        removeWorktree = answer === "Yes" || answer === "Delete chat and worktree";
+      }
+    }
+    try {
+      await invoke("delete_thread", { id, removeWorktree });
+    } catch (e) {
+      this.error = String(e);
+    }
     this.threads = this.threads.filter((t) => t.id !== id);
     buffers.delete(id);
     delete this.streaming[id];
     delete this.waiting[id];
-    if (this.current?.id === id) this.newChat();
+    for (const p of this.panes) {
+      if (p.current?.id !== id) continue;
+      if (this.panes.length > 1) this.closePane(p);
+      else this.newChat();
+    }
   }
 
-  async send(text: string) {
+  async send(text: string, pane = this.pane, attachments: string[] = []) {
     text = text.trim();
+    if (!text && attachments.length) text = "See the attached file" + (attachments.length > 1 ? "s." : ".");
     if (!text || !this.model) return;
-    if (!this.current && !this.folder && !(await this.pickFolder())) return;
+    if (!pane.current && !this.folder && !(await this.pickFolder())) return;
     const now = Date.now();
-    const id = this.current?.id ?? crypto.randomUUID();
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", text, createdAt: now };
+    const isNew = !pane.current;
+    const id = pane.current?.id ?? crypto.randomUUID();
+    const userMsg: Message = { id: crypto.randomUUID(), role: "user", text, createdAt: now, ...(attachments.length ? { attachments } : {}) };
 
-    if (this.current) {
-      this.current.messages.push(userMsg);
+    if (pane.current) {
+      pane.current.messages.push(userMsg);
     } else {
-      this.current = { id, title: text.slice(0, 48), model: this.model, effort: this.effort, access: this.access, cwd: this.folder, createdAt: now, updatedAt: now, messages: [userMsg] };
+      pane.current = { id, title: text.slice(0, 48), model: this.model, effort: this.effort, access: this.access, cwd: this.folder, createdAt: now, updatedAt: now, messages: [userMsg] };
     }
-    buffers.set(id, emptyLive());
+    // Compare mode: the same message to other models too, every chat in its own worktree.
+    const extras = isNew && this.repo && this.base ? this.compare.filter((m) => m !== this.model && this.models.some((x) => x.id === m)) : [];
+    // New chat in a new worktree of a git project, branched from `base`.
+    const base = isNew && (this.workspace === "worktree" || extras.length > 0) && this.repo && this.base ? this.base : null;
+    if (extras.length && base) {
+      this.compare = [];
+      Promise.all(extras.map((m) => this.sendExtra(text, m, base, attachments))).then((ids) => {
+        // Two models: show them side by side.
+        const other = ids.find(Boolean);
+        if (ids.length === 1 && other && this.panes.length === 1) this.openSplit(other, "right");
+      });
+    }
+    const live = emptyLive();
+    if (base) live.notice = `Creating a worktree from ${base}…`;
+    buffers.set(id, live);
     this.streaming[id] = true;
-    this.live = emptyLive();
+    pane.live = { ...live };
 
     try {
       const thread = await invoke<Thread>("send_message", {
-        threadId: id, text, model: this.model, effort: this.effort, access: this.access, cwd: this.current?.cwd ?? this.folder,
-        account: this.activeAccount,
+        threadId: id, text, model: this.model, effort: this.effort, access: this.access, cwd: pane.current?.cwd ?? this.folder,
+        account: this.activeAccount, worktree: base, attachments,
       });
+      for (const p of this.panes) {
+        if (p.current?.id !== id) continue;
+        p.current.cwd = thread.cwd;
+        p.current.worktree = thread.worktree;
+      }
       this.refreshThreads();
+      if (isNew) this.nameThread(id);
     } catch (e) {
       this.onChat({ kind: "done", threadId: id, message: { id: crypto.randomUUID(), role: "assistant", text: "", error: String(e), createdAt: Date.now() } });
     }
   }
 
-  async stop() {
-    if (this.current) await invoke("stop_turn", { threadId: this.current.id });
+  async stop(pane = this.pane) {
+    if (pane.current) await invoke("stop_turn", { threadId: pane.current.id });
   }
 
   async refreshThreads() {
@@ -440,10 +769,11 @@ class AppState {
       case "done": {
         buffers.delete(ev.threadId);
         delete this.streaming[ev.threadId];
-        const cur = this.current;
-        if (cur?.id === ev.threadId) {
+        for (const p of this.panes) {
+          const cur = p.current;
+          if (cur?.id !== ev.threadId) continue;
           if (ev.message && !cur.messages.some((m) => m.id === ev.message!.id)) cur.messages.push(ev.message);
-          this.live = null;
+          p.live = null;
         }
         delete this.waiting[ev.threadId];
         this.refreshThreads();
@@ -454,11 +784,13 @@ class AppState {
       if (buf.approvals.length) this.waiting[ev.threadId] = true;
       else delete this.waiting[ev.threadId];
     }
-    if (this.current?.id === ev.threadId && !flushTimer) {
+    if (this.isOpen(ev.threadId) && !flushTimer) {
       flushTimer = setTimeout(() => {
         flushTimer = null;
-        const b = this.current && buffers.get(this.current.id);
-        if (b) this.live = { parts: b.parts.map((p) => ({ ...p })), approvals: [...b.approvals], notice: b.notice };
+        for (const pane of this.panes) {
+          const b = pane.current && buffers.get(pane.current.id);
+          if (b) pane.live = { parts: b.parts.map((p) => ({ ...p })), approvals: [...b.approvals], notice: b.notice };
+        }
       }, FLUSH_MS);
     }
   }

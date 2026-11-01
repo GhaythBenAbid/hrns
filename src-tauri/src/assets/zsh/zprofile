@@ -1,0 +1,4 @@
+_hrns_dir="$ZDOTDIR"
+ZDOTDIR="$HRNS_USER_ZDOTDIR"
+[[ -f "$ZDOTDIR/.zprofile" ]] && source "$ZDOTDIR/.zprofile"
+ZDOTDIR="$_hrns_dir"

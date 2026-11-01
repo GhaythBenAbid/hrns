@@ -1,0 +1,7 @@
+# hrns shell integration: load the user's own startup files, then add command markers.
+# ZDOTDIR points here only while starting up; it's handed back at the end of .zshrc.
+_hrns_dir="$ZDOTDIR"
+ZDOTDIR="${HRNS_USER_ZDOTDIR:-$HOME}"
+[[ -f "$ZDOTDIR/.zshenv" ]] && source "$ZDOTDIR/.zshenv"
+HRNS_USER_ZDOTDIR="$ZDOTDIR"
+ZDOTDIR="$_hrns_dir"

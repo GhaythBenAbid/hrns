@@ -1,9 +1,14 @@
 mod accounts;
 mod codex;
+mod git;
 mod pricing;
+mod projects;
 mod remote;
+mod ship;
 mod store;
+mod terminal;
 mod usage;
+mod worktree;
 
 use accounts::{AccountEntry, Accounts};
 use pricing::{Price, Pricing};
@@ -13,6 +18,7 @@ use std::sync::Arc;
 use store::{Store, Summary, Thread};
 use remote::Remote;
 use tauri::{Listener, Manager, State};
+use terminal::Terminals;
 use usage::{Row, UsageLedger};
 
 type Acc<'a> = State<'a, Arc<Accounts>>;
@@ -55,25 +61,102 @@ fn git_branch(path: String) -> Option<String> {
     None
 }
 
+/// Per-file counts of the uncommitted changes in the repo containing `path` (no diff text).
+#[tauri::command]
+async fn git_status(path: String) -> Result<Option<git::Status>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::status(&path)).await.map_err(|e| e.to_string())
+}
+
+/// One file's uncommitted diff (None for binary or oversized files).
+#[tauri::command]
+async fn git_file_diff(root: String, path: String, old: Option<String>, untracked: bool) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::file_diff(&root, &path, old.as_deref(), untracked))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Project folders under the usual code locations in the home folder, for the project finder.
+#[tauri::command]
+async fn find_projects() -> Result<Vec<projects::Project>, String> {
+    tauri::async_runtime::spawn_blocking(projects::find).await.map_err(|e| e.to_string())
+}
+
+/// A project's own icon, or what it's built with (framework, else main language).
+#[tauri::command]
+async fn project_icon(path: String) -> Result<projects::Icon, String> {
+    tauri::async_runtime::spawn_blocking(move || projects::icon(&path)).await.map_err(|e| e.to_string())
+}
+
+// ---------- terminal ----------
+
+type Terms<'a> = State<'a, Arc<Terminals>>;
+
+#[tauri::command]
+fn term_list(terms: Terms) -> Vec<terminal::Info> {
+    terms.list()
+}
+
+#[tauri::command]
+fn term_open(terms: Terms, cwd: Option<String>, cols: u16, rows: u16) -> Result<terminal::Info, String> {
+    terms.open(cwd, cols, rows)
+}
+
+#[tauri::command]
+fn term_write(terms: Terms, id: String, data: String) -> Result<(), String> {
+    terms.write(&id, &data)
+}
+
+#[tauri::command]
+fn term_resize(terms: Terms, id: String, cols: u16, rows: u16) -> Result<(), String> {
+    terms.resize(&id, cols, rows)
+}
+
+#[tauri::command]
+fn term_close(terms: Terms, id: String) {
+    terms.close(&id)
+}
+
+#[tauri::command]
+fn term_scrollback(terms: Terms, id: String) -> Result<String, String> {
+    terms.scrollback(&id)
+}
+
 #[tauri::command]
 fn rename_thread(store: State<Arc<Store>>, id: String, title: String) {
     store.update(&id, |t| t.title = title);
 }
 
+/// With `remove_worktree`, also removes the chat's worktree (unless another chat uses it).
+/// Returns the branch name when it was kept because it has unmerged commits.
 #[tauri::command]
-async fn delete_thread(store: State<'_, Arc<Store>>, accounts: Acc<'_>, id: String) -> Result<(), String> {
-    if let Some(engine) = store.get(&id).and_then(|t| accounts.engine_for(&t).ok()) {
+async fn delete_thread(
+    store: State<'_, Arc<Store>>,
+    accounts: Acc<'_>,
+    id: String,
+    remove_worktree: Option<bool>,
+) -> Result<Option<String>, String> {
+    let thread = store.get(&id);
+    if let Some(engine) = thread.as_ref().and_then(|t| accounts.engine_for(t).ok()) {
         let _ = engine.stop(&id).await;
         engine.forget(&id);
     }
     store.delete(&id);
-    Ok(())
+    let Some(Thread { worktree: Some(wt), cwd: Some(cwd), .. }) = thread else { return Ok(None) };
+    let shared = store.list().iter().any(|s| s.cwd.as_deref() == Some(&cwd));
+    if remove_worktree != Some(true) || shared {
+        return Ok(None);
+    }
+    let branch = wt.branch.clone();
+    let kept = tauri::async_runtime::spawn_blocking(move || worktree::remove(&cwd, &wt)).await.map_err(|e| e.to_string())??;
+    Ok(kept.then_some(branch))
 }
 
 /// Existing chats stay on their own account; new chats use `account`.
+/// A new chat with `worktree` set (a base branch) first gets its own worktree of the project.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn send_message(
+    app: tauri::AppHandle,
     store: State<'_, Arc<Store>>,
     accounts: Acc<'_>,
     thread_id: Option<String>,
@@ -83,13 +166,155 @@ async fn send_message(
     access: String,
     cwd: Option<String>,
     account: String,
+    worktree: Option<String>,
+    attachments: Option<Vec<String>>,
 ) -> Result<Thread, String> {
+    let attachments: Vec<String> = attachments.unwrap_or_default().into_iter().filter(|p| std::path::Path::new(p).is_file()).collect();
     let existing = thread_id.as_deref().and_then(|id| store.get(id));
     let engine = match &existing {
         Some(t) => accounts.engine_for(t)?,
         None => accounts.engine(&account)?,
     };
-    engine.send(thread_id, text, model, effort, access, cwd).await
+    let (cwd, wt) = match (&existing, worktree, cwd) {
+        (None, Some(base), Some(project)) => {
+            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let hint = text.clone();
+            let (path, wt) = tauri::async_runtime::spawn_blocking(move || worktree::create(&data, &project, &base, &hint))
+                .await
+                .map_err(|e| e.to_string())??;
+            (Some(path.to_string_lossy().into_owned()), Some(wt))
+        }
+        (_, _, cwd) => (cwd, None),
+    };
+    let created = wt.clone().zip(cwd.clone());
+    let r = engine.send(thread_id, text, model, effort, access, cwd, wt, attachments).await;
+    if let (Err(_), Some((wt, path))) = (&r, created) {
+        // The chat never started: don't leave an empty worktree behind.
+        let _ = tauri::async_runtime::spawn_blocking(move || worktree::remove(&path, &wt)).await;
+    }
+    r
+}
+
+// ---------- finishing work: commit, push, PR, merge ----------
+
+/// Runs `f` on the chat's folder off the async runtime, with the user's login-shell PATH (for gh).
+async fn with_ship<R: Send + 'static>(
+    store: &Store,
+    id: &str,
+    f: impl FnOnce(&ship::Ctx) -> Result<R, String> + Send + 'static,
+) -> Result<R, String> {
+    let t = store.get(id).ok_or("No such chat")?;
+    let dir = t.cwd.ok_or("This chat has no project folder")?;
+    let wt = t.worktree;
+    let path_env = codex::login_path().await;
+    tauri::async_runtime::spawn_blocking(move || {
+        f(&ship::Ctx { dir: std::path::Path::new(&dir), worktree: wt.as_ref(), path_env: &path_env })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn ship_status(store: State<'_, Arc<Store>>, id: String) -> Result<Option<ship::Status>, String> {
+    with_ship(&store, &id, |c| Ok(ship::status(c))).await
+}
+
+#[tauri::command]
+async fn ship_commit(store: State<'_, Arc<Store>>, id: String, message: String) -> Result<String, String> {
+    with_ship(&store, &id, move |c| ship::commit(c, &message)).await
+}
+
+#[tauri::command]
+async fn ship_push(store: State<'_, Arc<Store>>, id: String) -> Result<(), String> {
+    with_ship(&store, &id, ship::push).await
+}
+
+/// Returns `{ url, compare }`: the PR, or (without the GitHub CLI) a compare page to open.
+#[tauri::command]
+async fn ship_pr(store: State<'_, Arc<Store>>, id: String, title: String, body: String) -> Result<Value, String> {
+    let pr = with_ship(&store, &id, move |c| ship::pull_request(c, &title, &body)).await?;
+    Ok(match pr {
+        ship::Pr::Opened(url) => serde_json::json!({ "url": url, "compare": false }),
+        ship::Pr::Compare(url) => serde_json::json!({ "url": url, "compare": true }),
+    })
+}
+
+#[tauri::command]
+async fn ship_merge(store: State<'_, Arc<Store>>, id: String) -> Result<String, String> {
+    with_ship(&store, &id, ship::merge).await
+}
+
+// ---------- attachments ----------
+
+const MAX_ATTACHMENT: usize = 20 * 1024 * 1024;
+
+/// Save pasted data (base64) as a file the agent can read; returns its path.
+#[tauri::command]
+fn save_attachment(app: tauri::AppHandle, data: String, ext: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.as_bytes()).map_err(|e| e.to_string())?;
+    if bytes.len() > MAX_ATTACHMENT {
+        return Err("Attachments can be up to 20 MB".into());
+    }
+    let ext: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("attachments");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.{}", uuid::Uuid::new_v4(), if ext.is_empty() { "bin" } else { &ext }));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// A small image attachment as a data URL for previews (None for other files or big images).
+#[tauri::command]
+async fn attachment_preview(path: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine;
+        let ext = std::path::Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+        let mime = match ext.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            _ => return None,
+        };
+        let meta = std::fs::metadata(&path).ok()?;
+        if meta.len() as usize > MAX_ATTACHMENT {
+            return None;
+        }
+        let bytes = std::fs::read(&path).ok()?;
+        Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Whether a folder is a git repo, and its branches (for the new-chat worktree picker).
+#[tauri::command]
+async fn repo_info(path: String) -> Result<Option<worktree::RepoInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || worktree::info(&path)).await.map_err(|e| e.to_string())
+}
+
+/// What deleting a chat's worktree would throw away (uncommitted files, unmerged commits).
+#[tauri::command]
+async fn worktree_check(store: State<'_, Arc<Store>>, id: String) -> Result<Option<worktree::Check>, String> {
+    let Some(t) = store.get(&id) else { return Ok(None) };
+    let (Some(wt), Some(cwd)) = (t.worktree, t.cwd) else { return Ok(None) };
+    tauri::async_runtime::spawn_blocking(move || Some(worktree::check(&cwd, &wt))).await.map_err(|e| e.to_string())
+}
+
+/// Have `model` name a chat from its first message (runs on the chat's own account).
+#[tauri::command]
+async fn generate_title(
+    store: State<'_, Arc<Store>>,
+    accounts: Acc<'_>,
+    thread_id: String,
+    model: String,
+    effort: Option<String>,
+) -> Result<String, String> {
+    let thread = store.get(&thread_id).ok_or("No such chat")?;
+    let first = thread.messages.iter().find(|m| m.role == "user").map(|m| m.text.clone()).ok_or("Chat has no message yet")?;
+    let engine = accounts.engine_for(&thread)?;
+    engine.generate_title(thread_id, first, model, effort).await
 }
 
 #[tauri::command]
@@ -200,10 +425,11 @@ pub fn run() {
             let ledger = Arc::new(UsageLedger::new(&data));
             app.manage(Accounts::open(app.handle().clone(), store.clone(), ledger.clone(), data.join("accounts")));
             app.manage(ledger);
+            app.manage(Terminals::new(app.handle().clone(), &data));
 
             // Mirror chat events to paired phones.
             let remote = Remote::new(app.handle().clone(), &data);
-            for kind in ["chat", "rate-limits"] {
+            for kind in ["chat", "rate-limits", "thread-title", "terminals"] {
                 let r = remote.clone();
                 app.listen_any(kind, move |e| r.publish(kind, e.payload()));
             }
@@ -221,9 +447,29 @@ pub fn run() {
             list_threads,
             get_thread,
             git_branch,
+            git_status,
+            git_file_diff,
+            repo_info,
+            save_attachment,
+            attachment_preview,
+            ship_status,
+            ship_commit,
+            ship_push,
+            ship_pr,
+            ship_merge,
+            worktree_check,
+            find_projects,
+            project_icon,
+            term_list,
+            term_open,
+            term_write,
+            term_resize,
+            term_close,
+            term_scrollback,
             rename_thread,
             delete_thread,
             send_message,
+            generate_title,
             stop_turn,
             respond_approval,
             list_models,
@@ -241,6 +487,12 @@ pub fn run() {
             remote_rotate,
             remote_test_notify
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Shells started from hrns end with it rather than lingering without a terminal.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Arc<Terminals>>().close_all();
+            }
+        });
 }

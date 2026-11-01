@@ -2,6 +2,8 @@
   import PartView from "./PartView.svelte";
   import ActivityGroup from "./ActivityGroup.svelte";
   import ApprovalCard from "./ApprovalCard.svelte";
+  import AttachmentChip from "./AttachmentChip.svelte";
+  import { toAttachment } from "./attachments";
   import type { Approval, Message, Part } from "./store.svelte";
 
   let {
@@ -9,7 +11,7 @@
     live = false,
     approvals = [],
     notice,
-  }: { msg: Pick<Message, "role" | "text" | "parts" | "model" | "error">; live?: boolean; approvals?: Approval[]; notice?: string } = $props();
+  }: { msg: Pick<Message, "role" | "text" | "parts" | "model" | "error" | "attachments">; live?: boolean; approvals?: Approval[]; notice?: string } = $props();
 
   // Older messages (or plain chat) may have only text.
   const parts = $derived<Part[]>(msg.parts ?? (msg.text ? [{ type: "text", id: "t", text: msg.text }] : []));
@@ -40,7 +42,14 @@
 </script>
 
 {#if msg.role === "user"}
-  <div class="user"><div class="bubble">{msg.text}</div></div>
+  <div class="user">
+    {#if msg.attachments?.length}
+      <div class="atts">
+        {#each msg.attachments as path (path)}<AttachmentChip a={toAttachment(path)} />{/each}
+      </div>
+    {/if}
+    <div class="bubble">{msg.text}</div>
+  </div>
 {:else}
   <div class="assistant">
     {#each blocks as b, i (b.kind === "group" ? b.id : b.part.id)}
@@ -79,7 +88,7 @@
 {/if}
 
 <style>
-  .user { display: flex; justify-content: flex-end; margin: 28px 0 18px; }
+  .user { display: flex; flex-direction: column; align-items: flex-end; margin: 28px 0 18px; }
   .bubble {
     max-width: 78%; padding: 10px 16px; border-radius: 20px 20px 6px 20px;
     background: var(--bubble); white-space: pre-wrap; overflow-wrap: anywhere;
@@ -102,4 +111,5 @@
   .tools { display: flex; align-items: center; gap: 6px; margin: 6px 0 0 -6px; opacity: 0; transition: opacity 0.12s; }
   .assistant:hover .tools { opacity: 1; }
   .model { font-size: 12px; color: var(--faint); }
+  .atts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-bottom: 6px; }
 </style>

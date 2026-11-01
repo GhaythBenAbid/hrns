@@ -1,0 +1,353 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style>/*XTERM_CSS*/</style>
+<style>
+  :root { --bg: #08080a; --card: #111113; --raised: #18181b; --border: #232327; --text: #e8e8ec; --muted: #85858f; --faint: #55555d; --accent: #a78bfa; --green: #4ade80; --red: #f87171; --size: 12px; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; width: 100%; max-width: 100vw; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, system-ui, Roboto, sans-serif; }
+
+  /* xterm always runs (it interprets every escape sequence); in card view it sits underneath, invisible. */
+  #t { position: absolute; inset: 6px 4px 4px 8px; overflow: hidden; }
+  body.blocks #t { opacity: 0; pointer-events: none; }
+  .xterm-helper-textarea { display: none !important; }
+  .xterm-viewport { scrollbar-width: none; }
+  .xterm-viewport::-webkit-scrollbar { display: none; }
+
+  #feed { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 10px 18px; display: none; -webkit-overflow-scrolling: touch; }
+  body.blocks #feed { display: block; }
+  #feed::-webkit-scrollbar { display: none; }
+
+  .intro { padding: 6px 6px 14px; color: var(--muted); font-size: 13px; }
+  .intro b { color: var(--text); font-weight: 600; font-family: ui-monospace, Menlo, 'Roboto Mono', monospace; font-size: 12.5px; }
+
+  .block { min-width: 0; max-width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 16px; margin-bottom: 10px; overflow: hidden; animation: in .22s cubic-bezier(.32,.72,0,1); }
+  @keyframes in { from { opacity: 0; transform: translateY(6px); } }
+  .block.running { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+  .block.failed { border-color: color-mix(in srgb, var(--red) 35%, var(--border)); }
+  .head { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px 9px; }
+  .cmd { flex: 1; min-width: 0; font: 600 13.5px/1.4 ui-monospace, Menlo, 'Roboto Mono', monospace; word-break: break-word; white-space: pre-wrap; }
+  .cmd::before { content: "$ "; color: var(--accent); }
+  .chip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 11px; font: 700 11px/1 -apple-system, system-ui, Roboto, sans-serif; font-variant-numeric: tabular-nums; }
+  .chip.ok { color: var(--green); background: color-mix(in srgb, var(--green) 13%, transparent); }
+  .chip.bad { color: var(--red); background: color-mix(in srgb, var(--red) 13%, transparent); }
+  .chip.run { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+  .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); animation: turn .8s linear infinite; }
+  @keyframes turn { to { transform: rotate(360deg); } }
+
+  .out { margin: 0; padding: 2px 12px 10px; font: var(--size)/1.5 ui-monospace, Menlo, 'Roboto Mono', 'Droid Sans Mono', monospace; white-space: pre-wrap; word-break: break-all; color: var(--text); -webkit-user-select: text; user-select: text; }
+  .out:empty { display: none; }
+  .more { display: block; width: 100%; padding: 8px 12px; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--accent); font: 600 12.5px -apple-system, system-ui, Roboto, sans-serif; text-align: left; }
+  .foot { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-top: 1px solid var(--border); }
+  .meta { flex: 1; min-width: 0; color: var(--faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .act { height: 30px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: 600 12px -apple-system, system-ui, Roboto, sans-serif; }
+  .act:active { background: var(--raised); color: var(--text); }
+  .act.stop { color: var(--red); }
+  .act.done { color: var(--green); }
+
+  .empty { text-align: center; color: var(--muted); padding: 40px 30px; font-size: 13.5px; line-height: 1.5; }
+  .empty b { display: block; color: var(--text); font-size: 16px; margin-bottom: 4px; }
+
+  #latest { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+    height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--border); background: var(--raised); color: var(--text);
+    font: 600 12.5px -apple-system, system-ui, Roboto, sans-serif; transition: opacity .2s, transform .2s cubic-bezier(.32,.72,0,1); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+  #latest.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+  body:not(.blocks) #latest { display: none; }
+</style>
+</head>
+<body class="blocks">
+<div id="t"></div>
+<div id="feed"><div class="intro" id="intro"></div><div id="list"></div></div>
+<button id="latest">↓ Latest output</button>
+<script>/*XTERM_JS*/</script>
+<script>/*FIT_JS*/</script>
+<script>
+(() => {
+  const q = new URLSearchParams(location.search);
+  const id = q.get("id"), token = q.get("token");
+  const light = q.get("scheme") === "light";
+  const hex = (k, d) => "#" + (q.get(k) || d);
+  const bg = hex("bg", light ? "f7f7f8" : "0b0b0d"), fg = hex("fg", light ? "18181b" : "e8e8ec"), accent = hex("accent", "a78bfa");
+  const root = document.documentElement.style;
+  const palette = light
+    ? { card: "#ffffff", raised: "#f2f2f4", border: "#e4e4e8", muted: "#6b6b76", faint: "#a1a1aa", green: "#16a34a", red: "#dc2626" }
+    : { card: "#111113", raised: "#18181b", border: "#232327", muted: "#85858f", faint: "#55555d", green: "#4ade80", red: "#f87171" };
+  root.setProperty("--bg", bg); root.setProperty("--text", fg); root.setProperty("--accent", accent);
+  for (const [k, v] of Object.entries(palette)) root.setProperty("--" + k, v);
+  const post = (m) => window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(m));
+
+  const ansi = light
+    ? ["#3f3f46", "#dc2626", "#16a34a", "#b45309", "#2563eb", "#9333ea", "#0891b2", "#71717a", "#52525b", "#ef4444", "#22c55e", "#d97706", "#3b82f6", "#a855f7", "#06b6d4", "#18181b"]
+    : ["#27272a", "#f87171", "#4ade80", "#fbbf24", "#60a5fa", "#c084fc", "#22d3ee", "#d4d4d8", "#52525b", "#fca5a5", "#86efac", "#fde68a", "#93c5fd", "#d8b4fe", "#67e8f9", "#fafafa"];
+  const names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
+  const theme = { background: bg, foreground: fg, cursor: accent, cursorAccent: bg, selectionBackground: accent + "55" };
+  ansi.forEach((c, i) => (theme[i < 8 ? names[i] : "bright" + names[i - 8][0].toUpperCase() + names[i - 8].slice(1)] = c));
+
+  let fontSize = +(q.get("size") || 12);
+  root.setProperty("--size", fontSize + "px");
+  const term = new Terminal({
+    fontFamily: "ui-monospace, Menlo, 'Roboto Mono', 'Droid Sans Mono', monospace",
+    fontSize, lineHeight: 1.15, theme, cursorBlink: true, scrollback: 8000, allowProposedApi: true,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById("t"));
+
+  // ---------- 256-color table, for turning xterm cells back into colored text ----------
+  const xterm256 = (() => {
+    const t = ansi.slice();
+    const lv = [0, 95, 135, 175, 215, 255];
+    for (let r = 0; r < 6; r++) for (let g = 0; g < 6; g++) for (let b = 0; b < 6; b++) t.push(`rgb(${lv[r]},${lv[g]},${lv[b]})`);
+    for (let i = 0; i < 24; i++) { const v = 8 + i * 10; t.push(`rgb(${v},${v},${v})`); }
+    return t;
+  })();
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function color(cell, fgSide) {
+    if (fgSide ? cell.isFgDefault() : cell.isBgDefault()) return null;
+    const v = fgSide ? cell.getFgColor() : cell.getBgColor();
+    if (fgSide ? cell.isFgRGB() : cell.isBgRGB()) return `rgb(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255})`;
+    return xterm256[v] || null;
+  }
+
+  /** Buffer rows [from, to] as HTML: wrapped rows joined, styles kept, trailing blank lines dropped. */
+  function render(from, to, limit) {
+    const buf = term.buffer.normal;
+    const lines = [];
+    let cur = "";
+    const cell = buf.getNullCell();
+    for (let y = from; y <= to; y++) {
+      const line = buf.getLine(y);
+      if (!line) break;
+      if (y > from && !line.isWrapped) { lines.push(cur); cur = ""; }
+      const text = line.translateToString(true);
+      let style = "", run = "", out = "";
+      for (let x = 0; x < text.length; x++) {
+        line.getCell(x, cell);
+        const ch = cell.getChars() || " ";
+        if (cell.getWidth() === 0) continue;
+        let f = color(cell, true), b = color(cell, false);
+        if (cell.isInverse()) [f, b] = [b || bg, f || fg];
+        const s = (f ? `color:${f};` : "") + (b ? `background:${b};` : "") + (cell.isBold() ? "font-weight:700;" : "") + (cell.isItalic() ? "font-style:italic;" : "") + (cell.isDim() ? "opacity:.6;" : "") + (cell.isUnderline() ? "text-decoration:underline;" : "");
+        if (s !== style) { if (run) out += style ? `<span style="${style}">${esc(run)}</span>` : esc(run); run = ""; style = s; }
+        run += ch;
+      }
+      if (run) out += style ? `<span style="${style}">${esc(run)}</span>` : esc(run);
+      cur += out;
+    }
+    lines.push(cur);
+    // Trailing blank lines, and zsh's "%" partial-line mark (printed just before the prompt), aren't output.
+    const plain = (l) => l.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+    while (lines.length && (plain(lines[lines.length - 1]) === "" || plain(lines[lines.length - 1]) === "%")) lines.pop();
+    const total = lines.length;
+    return { html: (limit && total > limit ? lines.slice(total - limit) : lines).join("\n"), total };
+  }
+
+  // ---------- command blocks from shell markers ----------
+  const list = document.getElementById("list"), feed = document.getElementById("feed"), intro = document.getElementById("intro");
+  const blocks = [];
+  let pending = null;     // command text from OSC 633;E, waiting for 133;C
+  let active = null;      // running block
+  let integrated = false; // seen any marker: the shell supports cards
+  let cwd = "";
+  const FOLD = 40;
+
+  const fmtTime = (ms) => ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+  const home = (p) => p.replace(/^\/Users\/[^/]+/, "~");
+
+  function makeBlock(command) {
+    const el = document.createElement("div");
+    el.className = "block running";
+    el.innerHTML = `<div class="head"><div class="cmd"></div><span class="chip run"><span class="spin"></span><span class="t">0 s</span></span></div><pre class="out"></pre><div class="foot"><span class="meta"></span><button class="act stop">Stop</button><button class="act copy">Copy</button><button class="act again">Run again</button></div>`;
+    el.querySelector(".cmd").textContent = command || "(command)";
+    el.querySelector(".meta").textContent = home(cwd);
+    // Markers follow their line as old output scrolls off the top of the buffer.
+    const b = { el, command, start: term.registerMarker(0), end: null, began: Date.now(), code: null, open: false, total: 0 };
+    el.querySelector(".stop").onclick = () => window.hrns.input("\x03");
+    el.querySelector(".again").onclick = () => post({ type: "fill", command: b.command });
+    el.querySelector(".copy").onclick = (e) => {
+      const text = el.querySelector(".out").innerText;
+      post({ type: "copy", text: text || b.command });
+      const btn = e.currentTarget; btn.textContent = "Copied"; btn.classList.add("done");
+      setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1200);
+    };
+    return b;
+  }
+
+  function paint(b) {
+    const buf = term.buffer.normal;
+    const from = Math.max(0, b.start ? b.start.line : 0);
+    const end = b.end ? b.end.line : buf.baseY + buf.cursorY;
+    const r = end < from ? { html: "", total: 0 } : render(from, end, b.open ? 0 : FOLD);
+    b.total = r.total;
+    b.el.querySelector(".out").innerHTML = r.html;
+    let more = b.el.querySelector(".more");
+    if (r.total > FOLD && !b.open) {
+      if (!more) {
+        more = document.createElement("button");
+        more.className = "more";
+        more.onclick = () => { b.open = true; more.remove(); paint(b); };
+        b.el.querySelector(".out").before(more);
+      }
+      more.textContent = `Show ${r.total - FOLD} earlier lines`;
+    }
+  }
+
+  /** Mark where the output ends: call while the cursor still sits right after it. */
+  function markEnd(b) {
+    const buf = term.buffer.normal;
+    // The cursor's line only belongs to the output if something was printed on it.
+    b.end = term.registerMarker(buf.cursorX === 0 ? -1 : 0);
+  }
+  function finish(b, code) {
+    if (!b.end) markEnd(b);
+    b.code = code;
+    paint(b);
+    const ms = Date.now() - b.began;
+    const ok = code === 0;
+    b.el.classList.remove("running");
+    if (!ok) b.el.classList.add("failed");
+    const chip = b.el.querySelector(".chip");
+    chip.className = "chip " + (ok ? "ok" : "bad");
+    chip.innerHTML = ok ? `✓ ${fmtTime(ms)}` : `✗ ${code} · ${fmtTime(ms)}`;
+    b.el.querySelector(".stop").remove();
+  }
+
+  function showIntro() {
+    intro.innerHTML = cwd ? `Shell in <b>${esc(home(cwd))}</b>` : "";
+    if (!blocks.length && integrated) list.innerHTML = `<div class="empty"><b>Ready</b>Run a command below. Each one shows up here as a card with its output.</div>`;
+  }
+
+  term.parser.registerOscHandler(633, (data) => {
+    if (data.startsWith("E;")) pending = data.slice(2);
+    return true;
+  });
+  term.parser.registerOscHandler(7, (data) => {
+    try { cwd = decodeURIComponent(new URL(data).pathname); } catch {}
+    post({ type: "cwd", path: cwd });
+    if (!blocks.length) showIntro();
+    return true;
+  });
+  term.parser.registerOscHandler(133, (data) => {
+    const kind = data[0];
+    if (!integrated) { integrated = true; setMode(userMode || "blocks"); showIntro(); }
+    if (kind === "C") {
+      if (!blocks.length) list.innerHTML = "";
+      active = makeBlock(pending ?? "");
+      pending = null;
+      blocks.push(active);
+      list.appendChild(active.el);
+      follow();
+    } else if (kind === "D" && active) {
+      const code = parseInt(data.split(";")[1] ?? "0", 10);
+      const b = active;
+      active = null;
+      markEnd(b);
+      // Paint after this chunk is parsed; the end is already pinned.
+      setTimeout(() => { finish(b, isNaN(code) ? 0 : code); follow(); }, 0);
+    }
+    return true;
+  });
+
+  // Live output for the running card, at most once a frame.
+  let raf = 0;
+  term.onWriteParsed(() => {
+    if (!active || raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; if (active) { paint(active); follow(); } });
+  });
+  setInterval(() => {
+    if (active) active.el.querySelector(".chip .t").textContent = fmtTime(Date.now() - active.began).replace(/\.\d s/, " s");
+  }, 1000);
+
+  // ---------- following output ----------
+  const latest = document.getElementById("latest");
+  let stuck = true;
+  feed.addEventListener("scroll", () => {
+    stuck = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+    latest.classList.toggle("show", !stuck);
+  }, { passive: true });
+  latest.onclick = () => { stuck = true; feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" }); };
+  function follow() { if (stuck) feed.scrollTop = feed.scrollHeight; else latest.classList.add("show"); }
+
+  // ---------- card view / raw view ----------
+  let mode = "raw", userMode = null;
+  function setMode(m, fromUser) {
+    if (fromUser) userMode = m;
+    mode = m;
+    document.body.classList.toggle("blocks", m === "blocks");
+    post({ type: "mode", mode: m });
+    if (m === "raw") setTimeout(() => { resize(); term.scrollToBottom(); }, 0);
+    else follow();
+  }
+  // Full-screen programs (vim, htop, less, claude…) need the real terminal; come back after.
+  term.buffer.onBufferChange((b) => {
+    if (b.type === "alternate") { setMode("raw"); post({ type: "fullscreen", on: true }); }
+    else { if (integrated) setMode(userMode || "blocks"); post({ type: "fullscreen", on: false }); }
+  });
+
+  // ---------- connection ----------
+  let ws = null, alive = true, pty = "";
+  const send = (m) => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
+  function claim() {
+    const key = term.cols + "x" + term.rows;
+    if (key !== pty) { pty = key; send({ type: "resize", cols: term.cols, rows: term.rows }); }
+  }
+  function resize() {
+    try { fit.fit(); } catch {}
+    if (document.body.offsetWidth) claim();
+  }
+  let rt = 0;
+  new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(resize, 220); }).observe(document.body);
+
+  function reset() {
+    blocks.length = 0; active = null; pending = null; list.innerHTML = "";
+    term.reset();
+  }
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${proto}//${location.host}/api/terminals/${encodeURIComponent(id)}/ws?token=${encodeURIComponent(token)}`);
+    ws.onopen = () => post({ type: "connected" });
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.type === "init") {
+        reset();
+        term.write(m.data, () => {
+          alive = m.alive; pty = m.cols + "x" + m.rows; resize();
+          if (!integrated) setMode("raw");
+          else { showIntro(); follow(); }
+          post({ type: "ready", integrated });
+          if (!alive) post({ type: "exit" });
+        });
+      }
+      else if (m.type === "data") term.write(m.data);
+      else if (m.type === "size") pty = m.cols + "x" + m.rows;
+      else if (m.type === "exit") {
+        alive = false;
+        term.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
+        if (active) finish(active, 130);
+        post({ type: "exit" });
+      }
+      else if (m.type === "gone") { alive = false; post({ type: "gone" }); }
+    };
+    ws.onclose = () => { post({ type: "disconnected" }); if (alive) setTimeout(connect, 1500); };
+  }
+  connect();
+
+  term.onTitleChange((t) => post({ type: "title", title: t }));
+  document.getElementById("t").addEventListener("click", () => post({ type: "tap" }));
+  feed.addEventListener("click", (e) => { if (e.target === feed || e.target.classList.contains("empty")) post({ type: "tap" }); });
+
+  // Called by the app through injectJavaScript.
+  window.hrns = {
+    input: (data) => { claim(); send({ type: "input", data }); stuck = true; },
+    font: (size) => { fontSize = size; term.options.fontSize = size; root.setProperty("--size", size + "px"); resize(); },
+    mode: (m) => setMode(m, true),
+    bottom: () => { stuck = true; follow(); term.scrollToBottom(); },
+    clear: () => { blocks.length = 0; list.innerHTML = ""; showIntro(); },
+  };
+  setTimeout(resize, 0);
+})();
+</script>
+</body>
+</html>

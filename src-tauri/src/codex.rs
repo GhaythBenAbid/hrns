@@ -130,6 +130,12 @@ impl Turn {
     }
 }
 
+/// A side turn that names a chat; its output never reaches the chat itself.
+struct TitleJob {
+    text: String,
+    done: Option<oneshot::Sender<Result<String, String>>>,
+}
+
 struct PendingApproval {
     local_id: String,
     ctid: String,
@@ -145,6 +151,8 @@ struct State {
     codex_to_local: HashMap<String, String>,
     turns: HashMap<String, Turn>,
     approvals: HashMap<String, PendingApproval>,
+    /// Title jobs, keyed by their own Codex thread id.
+    titles: HashMap<String, TitleJob>,
     /// Last cumulative token usage reported per Codex thread (to compute per-turn deltas).
     token_totals: HashMap<String, Usage>,
     last_activity: Option<Instant>,
@@ -235,6 +243,8 @@ impl Codex {
         effort: Option<String>,
         access: String,
         cwd: Option<String>,
+        worktree: Option<crate::worktree::Worktree>,
+        attachments: Vec<String>,
     ) -> Result<Thread, String> {
         let account = (self.account_id != "default").then(|| self.account_id.clone());
         let text = text.trim().to_owned();
@@ -256,6 +266,7 @@ impl Codex {
                 access: access.clone(),
                 cwd: Some(cwd),
                 account,
+                worktree,
                 usage: Default::default(),
                 created_at: now,
                 updated_at: now,
@@ -269,6 +280,7 @@ impl Codex {
             parts: None,
             model: None,
             error: None,
+            attachments: (!attachments.is_empty()).then(|| attachments.clone()),
             created_at: now,
         };
         let thread = self
@@ -302,7 +314,7 @@ impl Codex {
             let (_, approval, sandbox) = access_policy(&access);
             let mut params = json!({
                 "threadId": ctid,
-                "input": [{ "type": "text", "text": text }],
+                "input": turn_input(&text, &attachments),
                 "model": model,
                 "approvalPolicy": approval,
                 "sandboxPolicy": sandbox,
@@ -333,6 +345,97 @@ impl Codex {
             self.schedule_idle_shutdown();
         }
         Ok(thread)
+    }
+
+    /// Name a chat from its first message, like Codex does: a separate read-only thread on
+    /// `model` with no tools, whose reply becomes the title. Saves it and emits `thread-title`.
+    pub async fn generate_title(
+        self: &Arc<Self>,
+        local_id: String,
+        first: String,
+        model: String,
+        effort: Option<String>,
+    ) -> Result<String, String> {
+        let conn = self.conn().await?;
+        let cwd = self
+            .store
+            .get(&local_id)
+            .and_then(|t| t.cwd)
+            .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".into()));
+        let r = conn
+            .request(
+                "thread/start",
+                json!({ "ephemeral": true, "approvalPolicy": "never", "sandbox": "read-only", "cwd": cwd, "model": model, "serviceName": "hrns" }),
+            )
+            .await?;
+        let ctid = r["thread"]["id"].as_str().ok_or("Codex returned no thread id")?.to_owned();
+
+        let (tx, rx) = oneshot::channel();
+        self.state.lock().unwrap().titles.insert(ctid.clone(), TitleJob { text: String::new(), done: Some(tx) });
+        let excerpt: String = first.chars().take(2000).collect();
+        let prompt = format!(
+            "You name chat sessions. Write a short title (2-6 words, sentence case, no quotes, no trailing punctuation) \
+             for a conversation with a coding agent that starts with the message below. Reply with the title only; \
+             do not run any tools or commands.\n\n<message>\n{excerpt}\n</message>"
+        );
+        let mut params = json!({
+            "threadId": ctid,
+            "input": [{ "type": "text", "text": prompt }],
+            "model": model,
+            "approvalPolicy": "never",
+            "sandboxPolicy": { "type": "readOnly" },
+        });
+        if let Some(e) = &effort {
+            params["effort"] = json!(e);
+        }
+        let reply = match conn.request("turn/start", params).await {
+            Ok(_) => tokio::time::timeout(Duration::from_secs(90), rx)
+                .await
+                .map_err(|_| "Naming the chat took too long".to_owned())
+                .and_then(|r| r.map_err(|_| "Codex exited".to_owned()))
+                .and_then(|r| r),
+            Err(e) => Err(e),
+        };
+        {
+            let mut st = self.state.lock().unwrap();
+            st.titles.remove(&ctid);
+            st.token_totals.remove(&ctid);
+            st.last_activity = Some(Instant::now());
+        }
+        self.schedule_idle_shutdown();
+
+        let title = clean_title(&reply?).ok_or("The model returned no title")?;
+        self.store.update(&local_id, |t| t.title = title.clone()).ok_or("Thread vanished")?;
+        let _ = self.app.emit("thread-title", json!({ "threadId": local_id, "title": title }));
+        Ok(title)
+    }
+
+    /// Route a notification to its title job, if it belongs to one.
+    fn on_title_event(&self, method: &str, ctid: &str, p: &Value) -> bool {
+        let mut st = self.state.lock().unwrap();
+        let Some(job) = st.titles.get_mut(ctid) else { return false };
+        match method {
+            "item/agentMessage/delta" => job.text.push_str(p["delta"].as_str().unwrap_or_default()),
+            "item/completed" if p["item"]["type"] == "agentMessage" => {
+                if let Some(t) = p["item"]["text"].as_str().filter(|t| !t.is_empty()) {
+                    job.text = t.to_owned();
+                }
+            }
+            "error" if !p["willRetry"].as_bool().unwrap_or(false) => {
+                let message = p["error"]["message"].as_str().unwrap_or("Codex error").to_owned();
+                if let Some(tx) = job.done.take() {
+                    let _ = tx.send(Err(message));
+                }
+            }
+            "turn/completed" => {
+                if let Some(tx) = job.done.take() {
+                    let ok = p["turn"]["status"].as_str() != Some("failed");
+                    let _ = tx.send(if ok { Ok(job.text.clone()) } else { Err("Naming the chat failed".into()) });
+                }
+            }
+            _ => {}
+        }
+        true
     }
 
     pub async fn stop(self: &Arc<Self>, local_id: &str) -> Result<(), String> {
@@ -593,6 +696,9 @@ impl Codex {
 
     fn on_notification(self: &Arc<Self>, method: &str, p: &Value) {
         let ctid = p["threadId"].as_str().unwrap_or_default();
+        if self.on_title_event(method, ctid, p) {
+            return;
+        }
         match method {
             "turn/started" => {
                 let mut st = self.state.lock().unwrap();
@@ -735,6 +841,7 @@ impl Codex {
             parts: Some(parts),
             model: Some(model.clone()),
             error,
+            attachments: None,
             created_at: now_ms(),
         });
         self.ledger.log(&self.account_id, &model, &usage);
@@ -816,6 +923,19 @@ fn cap_tail(mut s: String) -> String {
     s
 }
 
+/// First line of a model's reply, without the quotes, labels or markdown models like to add.
+fn clean_title(reply: &str) -> Option<String> {
+    let line = reply.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let line = line.trim_start_matches(['#', '*', '-', ' ']);
+    let line = ["Title:", "title:", "TITLE:"].iter().fold(line, |l, p| l.strip_prefix(p).unwrap_or(l)).trim();
+    let line = line.trim_matches(['"', '\'', '`', '*', '“', '”', ' ']).trim_end_matches(['.', '!', ':']);
+    let mut title: String = line.chars().take(60).collect();
+    if line.chars().count() > 60 {
+        title.push('…');
+    }
+    (!title.is_empty()).then_some(title)
+}
+
 fn make_title(text: &str) -> String {
     let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("New chat").trim();
     let mut title: String = line.chars().take(48).collect();
@@ -825,8 +945,29 @@ fn make_title(text: &str) -> String {
     title
 }
 
+fn is_image(path: &str) -> bool {
+    let ext = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp")
+}
+
+/// The message as Codex input: images go in as images; other files are listed by path for the
+/// agent to read itself (it can, from the sandbox, unless they're outside what it may read).
+fn turn_input(text: &str, attachments: &[String]) -> Value {
+    let (images, files): (Vec<&String>, Vec<&String>) = attachments.iter().partition(|p| is_image(p));
+    let mut text = text.to_owned();
+    if !files.is_empty() {
+        text.push_str("\n\nAttached files:");
+        for f in &files {
+            text.push_str(&format!("\n- {f}"));
+        }
+    }
+    let mut input = vec![json!({ "type": "text", "text": text })];
+    input.extend(images.iter().map(|p| json!({ "type": "localImage", "path": p })));
+    Value::Array(input)
+}
+
 /// GUI apps launched from Finder get a minimal PATH; ask the login shell once.
-async fn login_path() -> String {
+pub async fn login_path() -> String {
     static PATH: OnceLock<String> = OnceLock::new();
     if let Some(p) = PATH.get() {
         return p.clone();
@@ -900,4 +1041,27 @@ fn find_native_codex(pkg_root: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clean_title, turn_input};
+    use serde_json::json;
+
+    #[test]
+    fn cleans_model_titles() {
+        assert_eq!(clean_title("Fix login redirect bug").as_deref(), Some("Fix login redirect bug"));
+        assert_eq!(clean_title("\n\"Add dark mode toggle.\"\n").as_deref(), Some("Add dark mode toggle"));
+        assert_eq!(clean_title("Title: **Refactor store**").as_deref(), Some("Refactor store"));
+        assert_eq!(clean_title("# Split view for chats\nextra").as_deref(), Some("Split view for chats"));
+        assert_eq!(clean_title("  \n "), None);
+    }
+
+    #[test]
+    fn attachments_input() {
+        let v = turn_input("look", &["/a/shot.PNG".into(), "/a/notes.md".into()]);
+        assert_eq!(v[0]["text"], "look\n\nAttached files:\n- /a/notes.md");
+        assert_eq!(v[1], json!({ "type": "localImage", "path": "/a/shot.PNG" }));
+        assert_eq!(turn_input("hi", &[]).as_array().unwrap().len(), 1);
+    }
 }
