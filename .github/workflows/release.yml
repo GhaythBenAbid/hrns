@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: --bundles nsis,msi
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - run: bun install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: bun tauri
+          args: ${{ matrix.args }}
+          tagName: ${{ github.ref_name }}
+          releaseName: hrns ${{ github.ref_name }}
+          releaseBody: |
+            Downloads:
+            - **macOS (Apple Silicon)**: `hrns_*_aarch64.dmg`
+            - **macOS (Intel)**: `hrns_*_x64.dmg`
+            - **Windows**: `hrns_*_x64-setup.exe` or `.msi`
+
+            The builds are unsigned. On macOS, right-click the app and choose Open the first time (or run `xattr -dr com.apple.quarantine /Applications/hrns.app`). On Windows, choose "More info → Run anyway" in SmartScreen.
+
+            Requires the Codex CLI, signed in with ChatGPT.
+          releaseDraft: false
+          prerelease: false
