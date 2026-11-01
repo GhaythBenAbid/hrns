@@ -167,7 +167,9 @@ async fn send_message(
     cwd: Option<String>,
     account: String,
     worktree: Option<String>,
+    attachments: Option<Vec<String>>,
 ) -> Result<Thread, String> {
+    let attachments: Vec<String> = attachments.unwrap_or_default().into_iter().filter(|p| std::path::Path::new(p).is_file()).collect();
     let existing = thread_id.as_deref().and_then(|id| store.get(id));
     let engine = match &existing {
         Some(t) => accounts.engine_for(t)?,
@@ -185,7 +187,7 @@ async fn send_message(
         (_, _, cwd) => (cwd, None),
     };
     let created = wt.clone().zip(cwd.clone());
-    let r = engine.send(thread_id, text, model, effort, access, cwd, wt).await;
+    let r = engine.send(thread_id, text, model, effort, access, cwd, wt, attachments).await;
     if let (Err(_), Some((wt, path))) = (&r, created) {
         // The chat never started: don't leave an empty worktree behind.
         let _ = tauri::async_runtime::spawn_blocking(move || worktree::remove(&path, &wt)).await;
@@ -240,6 +242,50 @@ async fn ship_pr(store: State<'_, Arc<Store>>, id: String, title: String, body: 
 #[tauri::command]
 async fn ship_merge(store: State<'_, Arc<Store>>, id: String) -> Result<String, String> {
     with_ship(&store, &id, ship::merge).await
+}
+
+// ---------- attachments ----------
+
+const MAX_ATTACHMENT: usize = 20 * 1024 * 1024;
+
+/// Save pasted data (base64) as a file the agent can read; returns its path.
+#[tauri::command]
+fn save_attachment(app: tauri::AppHandle, data: String, ext: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.as_bytes()).map_err(|e| e.to_string())?;
+    if bytes.len() > MAX_ATTACHMENT {
+        return Err("Attachments can be up to 20 MB".into());
+    }
+    let ext: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("attachments");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.{}", uuid::Uuid::new_v4(), if ext.is_empty() { "bin" } else { &ext }));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// A small image attachment as a data URL for previews (None for other files or big images).
+#[tauri::command]
+async fn attachment_preview(path: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine;
+        let ext = std::path::Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+        let mime = match ext.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            _ => return None,
+        };
+        let meta = std::fs::metadata(&path).ok()?;
+        if meta.len() as usize > MAX_ATTACHMENT {
+            return None;
+        }
+        let bytes = std::fs::read(&path).ok()?;
+        Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Whether a folder is a git repo, and its branches (for the new-chat worktree picker).
@@ -404,6 +450,8 @@ pub fn run() {
             git_status,
             git_file_diff,
             repo_info,
+            save_attachment,
+            attachment_preview,
             ship_status,
             ship_commit,
             ship_push,

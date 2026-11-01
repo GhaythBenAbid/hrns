@@ -67,6 +67,8 @@ export type Message = {
   parts?: Part[];
   model?: string;
   error?: string;
+  /** Files attached to a user message (absolute paths). */
+  attachments?: string[];
   createdAt: number;
 };
 
@@ -476,7 +478,7 @@ class AppState {
   }
 
   /** One extra chat of a comparison: same message, another model, its own worktree. */
-  private async sendExtra(text: string, model: string, base: string): Promise<string | null> {
+  private async sendExtra(text: string, model: string, base: string, attachments: string[]): Promise<string | null> {
     const id = crypto.randomUUID();
     const m = this.models.find((x) => x.id === model);
     const effort = this.effort && m?.supportedReasoningEfforts.some((e) => e.reasoningEffort === this.effort) ? this.effort : null;
@@ -484,7 +486,7 @@ class AppState {
     this.streaming[id] = true;
     try {
       await invoke<Thread>("send_message", {
-        threadId: id, text, model, effort, access: this.access, cwd: this.folder, account: this.activeAccount, worktree: base,
+        threadId: id, text, model, effort, access: this.access, cwd: this.folder, account: this.activeAccount, worktree: base, attachments,
       });
       await this.refreshThreads();
       this.nameThread(id);
@@ -643,14 +645,15 @@ class AppState {
     }
   }
 
-  async send(text: string, pane = this.pane) {
+  async send(text: string, pane = this.pane, attachments: string[] = []) {
     text = text.trim();
+    if (!text && attachments.length) text = "See the attached file" + (attachments.length > 1 ? "s." : ".");
     if (!text || !this.model) return;
     if (!pane.current && !this.folder && !(await this.pickFolder())) return;
     const now = Date.now();
     const isNew = !pane.current;
     const id = pane.current?.id ?? crypto.randomUUID();
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", text, createdAt: now };
+    const userMsg: Message = { id: crypto.randomUUID(), role: "user", text, createdAt: now, ...(attachments.length ? { attachments } : {}) };
 
     if (pane.current) {
       pane.current.messages.push(userMsg);
@@ -663,7 +666,7 @@ class AppState {
     const base = isNew && (this.workspace === "worktree" || extras.length > 0) && this.repo && this.base ? this.base : null;
     if (extras.length && base) {
       this.compare = [];
-      Promise.all(extras.map((m) => this.sendExtra(text, m, base))).then((ids) => {
+      Promise.all(extras.map((m) => this.sendExtra(text, m, base, attachments))).then((ids) => {
         // Two models: show them side by side.
         const other = ids.find(Boolean);
         if (ids.length === 1 && other && this.panes.length === 1) this.openSplit(other, "right");
@@ -678,7 +681,7 @@ class AppState {
     try {
       const thread = await invoke<Thread>("send_message", {
         threadId: id, text, model: this.model, effort: this.effort, access: this.access, cwd: pane.current?.cwd ?? this.folder,
-        account: this.activeAccount, worktree: base,
+        account: this.activeAccount, worktree: base, attachments,
       });
       for (const p of this.panes) {
         if (p.current?.id !== id) continue;

@@ -244,6 +244,7 @@ impl Codex {
         access: String,
         cwd: Option<String>,
         worktree: Option<crate::worktree::Worktree>,
+        attachments: Vec<String>,
     ) -> Result<Thread, String> {
         let account = (self.account_id != "default").then(|| self.account_id.clone());
         let text = text.trim().to_owned();
@@ -279,6 +280,7 @@ impl Codex {
             parts: None,
             model: None,
             error: None,
+            attachments: (!attachments.is_empty()).then(|| attachments.clone()),
             created_at: now,
         };
         let thread = self
@@ -312,7 +314,7 @@ impl Codex {
             let (_, approval, sandbox) = access_policy(&access);
             let mut params = json!({
                 "threadId": ctid,
-                "input": [{ "type": "text", "text": text }],
+                "input": turn_input(&text, &attachments),
                 "model": model,
                 "approvalPolicy": approval,
                 "sandboxPolicy": sandbox,
@@ -839,6 +841,7 @@ impl Codex {
             parts: Some(parts),
             model: Some(model.clone()),
             error,
+            attachments: None,
             created_at: now_ms(),
         });
         self.ledger.log(&self.account_id, &model, &usage);
@@ -942,6 +945,27 @@ fn make_title(text: &str) -> String {
     title
 }
 
+fn is_image(path: &str) -> bool {
+    let ext = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp")
+}
+
+/// The message as Codex input: images go in as images; other files are listed by path for the
+/// agent to read itself (it can, from the sandbox, unless they're outside what it may read).
+fn turn_input(text: &str, attachments: &[String]) -> Value {
+    let (images, files): (Vec<&String>, Vec<&String>) = attachments.iter().partition(|p| is_image(p));
+    let mut text = text.to_owned();
+    if !files.is_empty() {
+        text.push_str("\n\nAttached files:");
+        for f in &files {
+            text.push_str(&format!("\n- {f}"));
+        }
+    }
+    let mut input = vec![json!({ "type": "text", "text": text })];
+    input.extend(images.iter().map(|p| json!({ "type": "localImage", "path": p })));
+    Value::Array(input)
+}
+
 /// GUI apps launched from Finder get a minimal PATH; ask the login shell once.
 pub async fn login_path() -> String {
     static PATH: OnceLock<String> = OnceLock::new();
@@ -1021,7 +1045,8 @@ fn find_native_codex(pkg_root: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::clean_title;
+    use super::{clean_title, turn_input};
+    use serde_json::json;
 
     #[test]
     fn cleans_model_titles() {
@@ -1030,5 +1055,13 @@ mod tests {
         assert_eq!(clean_title("Title: **Refactor store**").as_deref(), Some("Refactor store"));
         assert_eq!(clean_title("# Split view for chats\nextra").as_deref(), Some("Split view for chats"));
         assert_eq!(clean_title("  \n "), None);
+    }
+
+    #[test]
+    fn attachments_input() {
+        let v = turn_input("look", &["/a/shot.PNG".into(), "/a/notes.md".into()]);
+        assert_eq!(v[0]["text"], "look\n\nAttached files:\n- /a/notes.md");
+        assert_eq!(v[1], json!({ "type": "localImage", "path": "/a/shot.PNG" }));
+        assert_eq!(turn_input("hi", &[]).as_array().unwrap().len(), 1);
     }
 }

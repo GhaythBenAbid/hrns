@@ -1,6 +1,10 @@
 <script lang="ts">
   import { app, projectOf, type Pane } from "./store.svelte";
   import ProjectIcon from "./ProjectIcon.svelte";
+  import AttachmentChip from "./AttachmentChip.svelte";
+  import { savePasted, toAttachment, type Attachment } from "./attachments";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
 
   let { pane, autofocus = false }: { pane: Pane; autofocus?: boolean } = $props();
   let text = $state("");
@@ -56,10 +60,62 @@
     box.style.height = Math.min(box.scrollHeight, 260) + "px";
   }
 
+  // Attachments: the paperclip, pasted images/files, or files dropped on the window.
+  let files = $state<Attachment[]>([]);
+  let dropping = $state(false);
+  let attachError = $state<string | null>(null);
+  function addPaths(paths: string[]) {
+    const have = new Set(files.map((f) => f.path));
+    files = [...files, ...paths.filter((p) => !have.has(p)).map(toAttachment)];
+  }
+  async function pickFiles() {
+    const r = await openDialog({ multiple: true, title: "Attach files", defaultPath: folder ?? undefined });
+    if (r) addPaths(Array.isArray(r) ? r : [r]);
+    box?.focus();
+  }
+  async function onpaste(e: ClipboardEvent) {
+    const pasted = [...(e.clipboardData?.files ?? [])];
+    if (!pasted.length) return;
+    e.preventDefault();
+    attachError = null;
+    for (const f of pasted) {
+      try {
+        const a = await savePasted(f);
+        files = [...files, a];
+      } catch (err) {
+        attachError = String(err);
+      }
+    }
+  }
+  // Drops go to the focused pane's composer.
+  $effect(() => {
+    let unlisten: (() => void) | undefined;
+    let gone = false;
+    getCurrentWebview()
+      .onDragDropEvent((e) => {
+        if (app.pane !== pane || app.view !== "chat") return (dropping = false);
+        const p = e.payload;
+        if (p.type === "enter" || p.type === "over") dropping = true;
+        else if (p.type === "leave") dropping = false;
+        else if (p.type === "drop") {
+          dropping = false;
+          addPaths(p.paths);
+          box?.focus();
+        }
+      })
+      .then((u) => (gone ? u() : (unlisten = u)));
+    return () => {
+      gone = true;
+      unlisten?.();
+    };
+  });
+
   function submit() {
-    if (streaming || !text.trim()) return;
-    app.send(text, pane);
+    if (streaming || (!text.trim() && !files.length)) return;
+    app.send(text, pane, files.map((f) => f.path));
     text = "";
+    files = [];
+    attachError = null;
     queueMicrotask(resize);
   }
 
@@ -77,18 +133,31 @@
 
 <svelte:window onclick={() => (menu = null)} />
 
-<div class="composer">
+<div class="composer" class:dropping>
+  {#if files.length || attachError}
+    <div class="files">
+      {#each files as f (f.path)}
+        <AttachmentChip a={f} onremove={() => (files = files.filter((x) => x !== f))} />
+      {/each}
+      {#if attachError}<span class="ferr">{attachError}</span>{/if}
+    </div>
+  {/if}
+  {#if dropping}<div class="drophint">Drop to attach</div>{/if}
   <textarea
     bind:this={box}
     bind:value={text}
     oninput={resize}
     onkeydown={onkey}
+    {onpaste}
     rows="1"
     placeholder="Ask anything…"
     spellcheck="true"
   ></textarea>
 
   <div class="row">
+    <button class="pill clip" title="Attach files or images (or paste / drop them)" onclick={pickFiles}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6L15 6.6" /></svg>
+    </button>
     <div class="pick model">
       <button class="pill" title={app.currentModel?.displayName} onclick={(e) => toggle(e, "model")}>
         <span class="lbl">{app.currentModel?.displayName ?? "Select model"}</span>
@@ -213,7 +282,7 @@
         <svg width="12" height="12" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" /></svg>
       </button>
     {:else}
-      <button class="send" title="Send (Enter)" disabled={!text.trim() || !app.model} onclick={submit}>
+      <button class="send" title="Send (Enter)" disabled={(!text.trim() && !files.length) || !app.model} onclick={submit}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
       </button>
     {/if}
@@ -228,6 +297,15 @@
     box-shadow: 0 0 0 1px rgb(255 255 255 / 0.02), 0 12px 40px rgb(0 0 0 / 0.6);
   }
   .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+  .composer { position: relative; }
+  .composer.dropping { border-color: var(--accent); border-style: dashed; }
+  .drophint {
+    position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; border-radius: inherit; pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--accent); font-size: 13px; font-weight: 600;
+  }
+  .files { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 0 8px; }
+  .ferr { font-size: 12px; color: var(--danger); }
+  .clip { padding: 0 8px; flex: none; }
   textarea {
     width: 100%; resize: none; border: 0; outline: 0; background: none;
     font-size: 15px; line-height: 1.5; max-height: 260px; padding: 2px 0 6px;

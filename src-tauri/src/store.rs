@@ -29,6 +29,9 @@ pub struct Message {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Files attached to a user message (absolute paths).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<String>>,
     pub created_at: i64,
 }
 
