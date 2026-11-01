@@ -65,12 +65,45 @@ export function diffHtml(patch: string): string {
     } else if (l.startsWith("\\")) {
       continue; // "\ No newline at end of file"
     } else if (l.startsWith("+")) {
-      out += `<div class="r a"><i></i><i>${n++}</i><b>+</b><span>${esc(l.slice(1))}</span></div>`;
+      out += `<div class="r a" data-n="${n}"><i></i><i>${n++}</i><b>+</b><span>${esc(l.slice(1))}</span></div>`;
     } else if (l.startsWith("-")) {
-      out += `<div class="r d"><i>${o++}</i><i></i><b>−</b><span>${esc(l.slice(1))}</span></div>`;
+      out += `<div class="r d" data-o="${o}"><i>${o++}</i><i></i><b>−</b><span>${esc(l.slice(1))}</span></div>`;
     } else {
-      out += `<div class="r"><i>${o++}</i><i>${n++}</i><b></b><span>${esc(l.slice(1))}</span></div>`;
+      out += `<div class="r" data-o="${o}" data-n="${n}"><i>${o++}</i><i>${n++}</i><b></b><span>${esc(l.slice(1))}</span></div>`;
     }
   }
   return out;
+}
+
+/** A review comment on one line of the uncommitted diff, to send to the agent. */
+export type ReviewComment = { id: string; path: string; line: number; side: "new" | "old"; code: string; text: string };
+
+class Reviews {
+  /** Draft comments per repository root. */
+  byRoot = $state<Record<string, ReviewComment[]>>({});
+
+  of(root: string | null | undefined) {
+    return (root && this.byRoot[root]) || [];
+  }
+  add(root: string, c: Omit<ReviewComment, "id">) {
+    this.byRoot[root] = [...this.of(root), { ...c, id: crypto.randomUUID() }];
+  }
+  remove(root: string, id: string) {
+    this.byRoot[root] = this.of(root).filter((c) => c.id !== id);
+  }
+  clear(root: string) {
+    delete this.byRoot[root];
+  }
+}
+export const reviews = new Reviews();
+
+/** The comments as one message for the agent, in file and line order. */
+export function reviewMessage(comments: ReviewComment[]): string {
+  const sorted = [...comments].sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
+  const items = sorted.map((c, i) => {
+    const where = c.side === "old" ? `${c.path}, removed line ${c.line}` : `${c.path}:${c.line}`;
+    const code = c.code.trim() ? `\n   \`${c.code.trim().slice(0, 200)}\`` : "";
+    return `${i + 1}. ${where}${code}\n   ${c.text.trim().replace(/\n/g, "\n   ")}`;
+  });
+  return `I reviewed the uncommitted changes. Please address these comments:\n\n${items.join("\n\n")}`;
 }

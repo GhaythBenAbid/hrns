@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { app } from "./store.svelte";
-  import { git, refreshDiff } from "./gitdiff.svelte";
+  import { git, refreshDiff, reviews, reviewMessage } from "./gitdiff.svelte";
   import DiffFile from "./DiffFile.svelte";
   import { fuzzy } from "./fuzzy";
 
@@ -25,6 +25,14 @@
   // Small files start open; big ones wait for a click.
   let opened = $state<Record<string, boolean>>({});
   const isOpen = (f: { path: string; add: number; del: number }, i: number) => opened[f.path] ?? (i < 12 && f.add + f.del <= 300);
+  // Review comments on this repo, sent to the chat this panel belongs to.
+  const comments = $derived(reviews.of(s?.root));
+  const busy = $derived(!!app.pane.current && !!app.streaming[app.pane.current.id]);
+  function sendReview() {
+    if (!s || !comments.length || busy) return;
+    app.send(reviewMessage(comments), app.pane);
+    reviews.clear(s.root);
+  }
   let branch = $state<string | null>(null);
   let spinning = $state(false);
   const fmt = (n: number) => n.toLocaleString("en-US");
@@ -119,6 +127,14 @@
       <div class="empty">Reading changes…</div>
     {/if}
   </div>
+
+  {#if s && comments.length}
+    <footer class="review">
+      <span class="rcount">{comments.length} comment{comments.length === 1 ? "" : "s"}</span>
+      <button class="ghost" onclick={() => reviews.clear(s.root)}>Discard</button>
+      <button class="send" disabled={busy} title={busy ? "Wait for the agent to finish" : "Send all comments to the agent in this chat"} onclick={sendReview}>Send to agent</button>
+    </footer>
+  {/if}
 </aside>
 
 <style>
@@ -154,4 +170,14 @@
   .count { font: 11px var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
   .list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
   .empty { padding: 32px 16px; text-align: center; font-size: 12.5px; color: var(--faint); }
+  .review {
+    flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--border);
+    background: color-mix(in srgb, #e0af68 7%, var(--sidebar));
+  }
+  .rcount { flex: 1; font-size: 12.5px; font-weight: 600; color: #e0af68; }
+  .review button { height: 28px; padding: 0 11px; border-radius: 8px; font-size: 12.5px; font-weight: 550; }
+  .review .ghost { color: var(--muted); }
+  .review .ghost:hover { background: var(--hover); color: var(--text); }
+  .review .send { background: var(--text); color: var(--bg); }
+  .review .send:disabled { opacity: 0.4; }
 </style>
