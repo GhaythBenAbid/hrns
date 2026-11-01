@@ -4,6 +4,7 @@ mod git;
 mod pricing;
 mod projects;
 mod remote;
+mod ship;
 mod store;
 mod terminal;
 mod usage;
@@ -192,6 +193,55 @@ async fn send_message(
     r
 }
 
+// ---------- finishing work: commit, push, PR, merge ----------
+
+/// Runs `f` on the chat's folder off the async runtime, with the user's login-shell PATH (for gh).
+async fn with_ship<R: Send + 'static>(
+    store: &Store,
+    id: &str,
+    f: impl FnOnce(&ship::Ctx) -> Result<R, String> + Send + 'static,
+) -> Result<R, String> {
+    let t = store.get(id).ok_or("No such chat")?;
+    let dir = t.cwd.ok_or("This chat has no project folder")?;
+    let wt = t.worktree;
+    let path_env = codex::login_path().await;
+    tauri::async_runtime::spawn_blocking(move || {
+        f(&ship::Ctx { dir: std::path::Path::new(&dir), worktree: wt.as_ref(), path_env: &path_env })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn ship_status(store: State<'_, Arc<Store>>, id: String) -> Result<Option<ship::Status>, String> {
+    with_ship(&store, &id, |c| Ok(ship::status(c))).await
+}
+
+#[tauri::command]
+async fn ship_commit(store: State<'_, Arc<Store>>, id: String, message: String) -> Result<String, String> {
+    with_ship(&store, &id, move |c| ship::commit(c, &message)).await
+}
+
+#[tauri::command]
+async fn ship_push(store: State<'_, Arc<Store>>, id: String) -> Result<(), String> {
+    with_ship(&store, &id, ship::push).await
+}
+
+/// Returns `{ url, compare }`: the PR, or (without the GitHub CLI) a compare page to open.
+#[tauri::command]
+async fn ship_pr(store: State<'_, Arc<Store>>, id: String, title: String, body: String) -> Result<Value, String> {
+    let pr = with_ship(&store, &id, move |c| ship::pull_request(c, &title, &body)).await?;
+    Ok(match pr {
+        ship::Pr::Opened(url) => serde_json::json!({ "url": url, "compare": false }),
+        ship::Pr::Compare(url) => serde_json::json!({ "url": url, "compare": true }),
+    })
+}
+
+#[tauri::command]
+async fn ship_merge(store: State<'_, Arc<Store>>, id: String) -> Result<String, String> {
+    with_ship(&store, &id, ship::merge).await
+}
+
 /// Whether a folder is a git repo, and its branches (for the new-chat worktree picker).
 #[tauri::command]
 async fn repo_info(path: String) -> Result<Option<worktree::RepoInfo>, String> {
@@ -354,6 +404,11 @@ pub fn run() {
             git_status,
             git_file_diff,
             repo_info,
+            ship_status,
+            ship_commit,
+            ship_push,
+            ship_pr,
+            ship_merge,
             worktree_check,
             find_projects,
             project_icon,

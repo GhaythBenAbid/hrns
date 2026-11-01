@@ -943,7 +943,7 @@ fn make_title(text: &str) -> String {
 }
 
 /// GUI apps launched from Finder get a minimal PATH; ask the login shell once.
-async fn login_path() -> String {
+pub async fn login_path() -> String {
     static PATH: OnceLock<String> = OnceLock::new();
     if let Some(p) = PATH.get() {
         return p.clone();

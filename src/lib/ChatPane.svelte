@@ -8,6 +8,7 @@
   import ProjectIcon from "./ProjectIcon.svelte";
   import AnimatedTitle from "./AnimatedTitle.svelte";
   import DiffButton from "./DiffButton.svelte";
+  import ShipButton from "./ShipButton.svelte";
 
   let { pane }: { pane: Pane } = $props();
 
@@ -94,6 +95,7 @@
     <div class="pane-head">
       <span class="pane-title"><AnimatedTitle text={pane.current?.title ?? "New chat"} id={pane.current?.id} /></span>
       <DiffButton {pane} />
+      <ShipButton {pane} />
       <button class="icon-btn close" title="Close pane" onclick={() => app.closePane(pane)}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
       </button>

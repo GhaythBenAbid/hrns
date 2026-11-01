@@ -9,6 +9,7 @@
   import ProjectFinder from "./lib/ProjectFinder.svelte";
   import AnimatedTitle from "./lib/AnimatedTitle.svelte";
   import DiffButton from "./lib/DiffButton.svelte";
+  import ShipButton from "./lib/ShipButton.svelte";
   import DiffSidebar from "./lib/DiffSidebar.svelte";
   import TerminalPanel from "./lib/TerminalPanel.svelte";
   import { terms } from "./lib/terminal.svelte";
@@ -169,6 +170,7 @@
             {#if terms.list.length}<span class="badge">{terms.list.length}</span>{/if}
           </button>
           <DiffButton pane={app.panes[0]} />
+          <ShipButton pane={app.panes[0]} />
         </div>
       {/if}
     </header>
