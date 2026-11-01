@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import type { Client, Price, UsageRow } from "../api";
-import { c } from "../theme";
+import { alpha, c, sheet } from "../theme";
 
 const RANGES = [7, 30, 90] as const;
-// Same fixed categorical order as the desktop Usage page.
-const SERIES = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
+// Same fixed categorical order as the desktop Usage page, stepped for each theme.
+const SERIES_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
+const SERIES_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
 
 type Agg = { cost: number; tokens: number; input: number; cached: number; output: number; reasoning: number; requests: number; savings: number; pricedTokens: number };
 const empty = (): Agg => ({ cost: 0, tokens: 0, input: 0, cached: 0, output: 0, reasoning: 0, requests: 0, savings: 0, pricedTokens: 0 });
@@ -72,6 +73,7 @@ export function Usage({ client, accountLabel }: { client: Client; accountLabel: 
     return { keys, total, bySource, byModel, byDay, dayTotal, sources };
   }, [rows, prices, days, metric]);
 
+  const SERIES = c.scheme === "light" ? SERIES_LIGHT : SERIES_DARK;
   const color = (s: string) => SERIES[Math.max(0, data.sources.indexOf(s)) % SERIES.length];
   const sourceName = (s: string) => (s === "codex" ? "Codex CLI & apps" : `hrns · ${accountLabel(s)}`);
   const maxDay = Math.max(...data.keys.map((k) => [...(data.byDay.get(k)?.values() ?? [])].reduce((a, b) => a + b, 0)), 0.0001);
@@ -180,7 +182,7 @@ export function Usage({ client, accountLabel }: { client: Client; accountLabel: 
   );
 }
 
-const styles = StyleSheet.create({
+const styles = sheet(() => ({
   wrap: { padding: 20, paddingBottom: 40 },
   h1: { color: c.text, fontSize: 30, fontWeight: "700", letterSpacing: -0.5, marginBottom: 14 },
   h2: { color: c.text, fontSize: 15, fontWeight: "700" },
@@ -216,4 +218,4 @@ const styles = StyleSheet.create({
   model: { flex: 1, color: c.text, fontFamily: c.mono, fontSize: 13 },
   cell: { color: c.text, fontSize: 13.5, textAlign: "right", width: 80 },
   note: { color: c.faint, fontSize: 12, marginTop: 16, lineHeight: 18 },
-});
+}));

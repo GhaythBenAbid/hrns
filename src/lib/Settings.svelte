@@ -3,10 +3,11 @@
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import QRCode from "qrcode";
-  import { app, type Access } from "./store.svelte";
+  import { app, accents, fonts, monoFonts, type Access, type AccentPreset, type Font, type MonoFont, type Theme } from "./store.svelte";
 
   const sections = [
     { id: "general", label: "General", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" },
+    { id: "appearance", label: "Appearance", icon: "M12 22a10 10 0 1 1 0-20c5.5 0 10 4 10 9a5 5 0 0 1-5 5h-1.8a1.7 1.7 0 0 0-1.2 2.9 1.7 1.7 0 0 1-1.2 3.1ZM7.5 11.5h.01M10.5 7.5h.01M15.5 7.5h.01" },
     { id: "models", label: "Models", icon: "M12 2 2 7l10 5 10-5ZM2 17l10 5 10-5M2 12l10 5 10-5" },
     { id: "permissions", label: "Permissions", icon: "M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6Z" },
     { id: "remote", label: "Remote", icon: "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2ZM11 18h2" },
@@ -68,6 +69,16 @@
     { id: "large", label: "Large" },
   ] as const;
 
+  const themes: { id: Theme; label: string }[] = [
+    { id: "system", label: "System" },
+    { id: "light", label: "Light" },
+    { id: "dark", label: "Dark" },
+  ];
+  const accentList = Object.entries(accents) as [AccentPreset, (typeof accents)[AccentPreset]][];
+  const customAccent = $derived(app.accent.startsWith("#") ? app.accent : null);
+  const fontList = Object.entries(fonts) as [Font, (typeof fonts)[Font]][];
+  const monoList = Object.entries(monoFonts) as [MonoFont, (typeof monoFonts)[MonoFont]][];
+
   const efforts = $derived(app.currentModel?.supportedReasoningEfforts ?? []);
   const effort = $derived(app.effort ?? app.currentModel?.defaultReasoningEffort ?? "");
 
@@ -110,6 +121,57 @@
               {app.folder ? app.folder.replace(/^\/Users\/[^/]+/, "~") : "Choose…"}
             </button>
           </div>
+        </div>
+
+        <h2>Keyboard shortcuts</h2>
+        <div class="group keys">
+          {#each [["New chat", "⌘N"], ["Open project", "⌘O"], ["Search chats", "⌘K"], ["Close split pane", "⌘W"], ["Toggle sidebar", "⌘B"], ["Settings", "⌘,"], ["Close Settings / Usage", "Esc"], ["Send message", "↵"], ["New line", "⇧↵"], ["Approve request", "⌘↵"], ["Stop response", "Esc"]] as [label, key]}
+            <div class="row compact"><span>{label}</span><kbd>{key}</kbd></div>
+          {/each}
+        </div>
+
+      {:else if section === "appearance"}
+        <h1>Appearance</h1>
+
+        <div class="group">
+          <div class="row">
+            <div class="text">
+              <div class="label">Theme</div>
+              <div class="hint">System follows your Mac's light or dark setting.</div>
+            </div>
+            <div class="themes">
+              {#each themes as t (t.id)}
+                <button class="theme-opt" class:sel={app.theme === t.id} onclick={() => app.setTheme(t.id)}>
+                  <span class="swatch {t.id}" aria-hidden="true">
+                    <span class="sw-side"></span>
+                    <span class="sw-main"><span class="sw-line"></span><span class="sw-line short"></span><span class="sw-box"></span></span>
+                  </span>
+                  {t.label}
+                </button>
+              {/each}
+            </div>
+          </div>
+          <div class="row">
+            <div class="text">
+              <div class="label">Accent color</div>
+              <div class="hint">Used for highlights, selection and the active chat.</div>
+            </div>
+            <div class="accents">
+              {#each accentList as [id, a] (id)}
+                <button
+                  class="dot"
+                  class:sel={app.accent === id}
+                  title={a.label}
+                  aria-label={a.label}
+                  style:background="light-dark({a.light}, {a.dark})"
+                  onclick={() => app.setAccent(id)}
+                ></button>
+              {/each}
+              <label class="dot custom" class:sel={!!customAccent} title="Custom color" style:background={customAccent ?? undefined}>
+                <input type="color" value={customAccent ?? "#a78bfa"} oninput={(e) => app.setAccent(e.currentTarget.value)} aria-label="Custom accent color" />
+              </label>
+            </div>
+          </div>
           <div class="row">
             <div class="text">
               <div class="label">Text size</div>
@@ -123,11 +185,27 @@
           </div>
         </div>
 
-        <h2>Keyboard shortcuts</h2>
-        <div class="group keys">
-          {#each [["New chat", "⌘N"], ["Search chats", "⌘K"], ["Toggle sidebar", "⌘B"], ["Settings", "⌘,"], ["Close Settings / Usage", "Esc"], ["Send message", "↵"], ["New line", "⇧↵"], ["Approve request", "⌘↵"], ["Stop response", "Esc"]] as [label, key]}
-            <div class="row compact"><span>{label}</span><kbd>{key}</kbd></div>
+        <h2>Interface font</h2>
+        <div class="fonts">
+          {#each fontList as [id, f] (id)}
+            <button class="font-opt" class:sel={app.font === id} style:font-family={f.stack} onclick={() => app.setFont(id)}>
+              <span class="font-aa">Aa</span>
+              <span class="font-name">{f.label}</span>
+            </button>
           {/each}
+        </div>
+
+        <h2>Code font</h2>
+        <div class="fonts">
+          {#each monoList as [id, f] (id)}
+            <button class="font-opt" class:sel={app.monoFont === id} style:font-family={f.stack} onclick={() => app.setMonoFont(id)}>
+              <span class="font-aa mono-aa">{"{ }"}</span>
+              <span class="font-name">{f.label}</span>
+            </button>
+          {/each}
+        </div>
+        <div class="preview md">
+          <div class="code"><pre><span class="hljs-keyword">const</span> <span class="hljs-title function_">greet</span> = (name) =&gt; <span class="hljs-string">`Hello, ${"{"}name{"}"}`</span>; <span class="hljs-comment">// 0O 1lI</span></pre></div>
         </div>
 
       {:else if section === "models"}
@@ -162,6 +240,26 @@
             {/each}
           </div>
         {/if}
+
+        <h2>Session titles</h2>
+        <div class="group">
+          <div class="row">
+            <div class="text">
+              <div class="label">Title model</div>
+              <div class="hint">
+                {#if app.titleModel === "off"}New chats are named after the first line of your message.
+                {:else}After your first message, {app.titleNamer?.displayName ?? "this model"} writes a short title for the chat.{/if}
+              </div>
+            </div>
+            <select class="select" value={app.titleModel} onchange={(e) => app.setTitleModel(e.currentTarget.value)}>
+              <option value="auto">Auto{app.titleModel === "auto" && app.titleNamer ? ` (${app.titleNamer.displayName})` : ""}</option>
+              {#each app.models as m (m.id)}
+                <option value={m.id}>{m.displayName}</option>
+              {/each}
+              <option value="off">Off</option>
+            </select>
+          </div>
+        </div>
 
       {:else if section === "permissions"}
         <h1>Permissions</h1>
@@ -331,9 +429,66 @@
   .btn.primary { background: var(--text); color: var(--bg); border-color: transparent; }
   .btn.danger:hover { color: var(--danger); }
 
+  .select {
+    flex: none; height: 32px; max-width: 240px; padding: 0 30px 0 12px; border-radius: 9px; font-size: 13px;
+    border: 1px solid var(--border); background: var(--raised); color: var(--text); outline: 0; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2385858f' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center;
+  }
+  .select:focus { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
   .seg { flex: none; display: flex; padding: 3px; border-radius: 10px; background: var(--raised); }
   .seg button { height: 28px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; color: var(--muted); }
   .seg button.sel { background: var(--hover); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }
+
+  .themes { flex: none; display: flex; gap: 10px; }
+  .theme-opt { display: grid; justify-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .theme-opt.sel { color: var(--text); font-weight: 550; }
+  .swatch {
+    width: 76px; height: 50px; border-radius: 9px; overflow: hidden; display: flex;
+    border: 1px solid var(--border); outline: 2px solid transparent; outline-offset: 2px; transition: outline-color 0.12s;
+    --s-bg: #08080a; --s-side: #111113; --s-line: #2a2a30; --s-box: #18181b;
+  }
+  .swatch.light { --s-bg: #ffffff; --s-side: #f2f2f4; --s-line: #dcdce2; --s-box: #ececef; }
+  .swatch.system { background: linear-gradient(135deg, #f2f2f4 50%, #111113 50%); }
+  .theme-opt:hover .swatch { outline-color: var(--border); }
+  .theme-opt.sel .swatch { outline-color: var(--accent); }
+  .sw-side { width: 20px; background: var(--s-side); }
+  .sw-main { flex: 1; background: var(--s-bg); padding: 8px 7px; display: grid; align-content: start; gap: 4px; }
+  .system .sw-side, .system .sw-main { background: transparent; }
+  .system .sw-line { background: #85858f80; }
+  .sw-line { height: 3px; border-radius: 2px; background: var(--s-line); }
+  .sw-line.short { width: 60%; }
+  .sw-box { height: 9px; margin-top: 3px; border-radius: 3px; background: var(--s-box); }
+  .system .sw-box { background: #85858f40; }
+
+  .accents { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 320px; }
+  .dot {
+    position: relative; width: 22px; height: 22px; border-radius: 50%; flex: none;
+    outline: 2px solid transparent; outline-offset: 2px; transition: outline-color 0.12s, transform 0.12s;
+  }
+  .dot:hover { transform: scale(1.1); }
+  .dot.sel { outline-color: var(--text); }
+  .dot.custom { background: conic-gradient(#f87171, #fbbf24, #4ade80, #2dd4bf, #60a5fa, #a78bfa, #f472b6, #f87171); }
+  .dot.custom::after {
+    content: "+"; position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 14px; font-weight: 700; line-height: 1; color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+  }
+  .dot.custom.sel::after { content: ""; }
+  .dot input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; cursor: default; }
+
+  .fonts { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+  .font-opt {
+    display: grid; justify-items: start; gap: 6px; padding: 14px 14px 12px; border-radius: 12px; text-align: left;
+    border: 1px solid var(--border); background: var(--panel);
+  }
+  .font-opt:hover { background: var(--hover); }
+  .font-opt.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .font-aa { font-size: 26px; line-height: 1.1; font-weight: 500; }
+  .mono-aa { font-size: 22px; }
+  .font-name { font-size: 12.5px; color: var(--muted); }
+  .font-opt.sel .font-name { color: var(--text); }
+  .preview { margin-top: 12px; }
+  .preview .code { margin: 0; }
 
   .keys kbd { font: 12px var(--font); color: var(--muted); background: var(--raised); border: 1px solid var(--border); padding: 1px 8px; border-radius: 6px; }
 

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import type { AccountStatus, Client, Model, Prefs } from "../api";
 import { enableNotifications, notificationsEnabled } from "../notify";
 import { savePrefs } from "../prefs";
-import { c } from "../theme";
+import { accents, alpha, c, sheet, type Accent, type Appearance, type ThemeMode } from "../theme";
 
 type Account = { id: string; email?: string | null; plan?: string | null };
 
@@ -19,10 +19,18 @@ type Props = {
   connected: boolean;
   prefs: Prefs;
   onPrefs: (p: Prefs) => void;
+  look: Appearance;
+  onLook: (a: Appearance) => void;
   onUnpair: () => void;
 };
 
-export function Settings({ client, host, connected, prefs, onPrefs, onUnpair }: Props) {
+const THEMES: { id: ThemeMode; label: string }[] = [
+  { id: "system", label: "System" },
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+];
+
+export function Settings({ client, host, connected, prefs, onPrefs, look, onLook, onUnpair }: Props) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AccountStatus>>({});
   const [models, setModels] = useState<Model[] | null>(null);
@@ -56,6 +64,9 @@ export function Settings({ client, host, connected, prefs, onPrefs, onUnpair }: 
 
   const model = models?.find((m) => m.id === prefs.model) ?? models?.find((m) => m.isDefault) ?? models?.[0];
   const effort = prefs.effort ?? model?.defaultReasoningEffort;
+  const namer = models?.find((m) => /mini|nano|spark|flash|lite/i.test(m.id)) ?? model;
+  const theme = look.theme ?? "system";
+  const accent = look.accent ?? "violet";
 
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
@@ -73,6 +84,44 @@ export function Settings({ client, host, connected, prefs, onPrefs, onUnpair }: 
         >
           <Row label="Unpair" danger />
         </Pressable>
+      </Section>
+
+      <Section title="Appearance">
+        <View style={styles.themes}>
+          {THEMES.map((t) => {
+            const on = theme === t.id;
+            return (
+              <Pressable key={t.id} style={styles.themeOpt} onPress={() => onLook({ ...look, theme: t.id })} accessibilityState={{ selected: on }}>
+                <View style={[styles.swatch, on && { borderColor: c.accent }]}>
+                  {t.id === "system" ? (
+                    <View style={{ flex: 1, flexDirection: "row" }}>
+                      <View style={[styles.swatchHalf, { backgroundColor: "#f2f2f4" }]}><View style={[styles.swatchLine, { backgroundColor: "#d4d4d8" }]} /></View>
+                      <View style={[styles.swatchHalf, { backgroundColor: "#111113" }]}><View style={[styles.swatchLine, { backgroundColor: "#3f3f46" }]} /></View>
+                    </View>
+                  ) : (
+                    <View style={[styles.swatchHalf, { backgroundColor: t.id === "light" ? "#f2f2f4" : "#111113" }]}>
+                      <View style={[styles.swatchLine, { backgroundColor: t.id === "light" ? "#d4d4d8" : "#3f3f46" }]} />
+                      <View style={[styles.swatchLine, { width: "40%", backgroundColor: accents[accent][t.id] }]} />
+                    </View>
+                  )}
+                </View>
+                <Text style={[styles.themeLabel, on && { color: c.text, fontWeight: "700" }]}>{t.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <View style={styles.accents}>
+          {(Object.keys(accents) as Accent[]).map((id) => {
+            const on = accent === id;
+            return (
+              <Pressable key={id} onPress={() => onLook({ ...look, accent: id })} hitSlop={4} accessibilityLabel={`${accents[id].label} accent`} accessibilityState={{ selected: on }}>
+                <View style={[styles.dotRing, on && { borderColor: accents[id][c.scheme] }]}>
+                  <View style={[styles.accentDot, { backgroundColor: accents[id][c.scheme] }]} />
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       </Section>
 
       <Section title="Notifications" note="Approvals and finished turns from your Mac, with Approve / Deny right in the notification.">
@@ -135,6 +184,20 @@ export function Settings({ client, host, connected, prefs, onPrefs, onUnpair }: 
         </Section>
       )}
 
+      <Section title="Chat titles" note="A model names chats you start from the phone after the first message. The new title scrambles in.">
+        <Pressable onPress={() => update({ titleModel: "auto" })}>
+          <Row label="Auto" hint={namer ? `Small and fast: ${namer.displayName}` : "Picks a small, fast model"} selected={(prefs.titleModel ?? "auto") === "auto"} />
+        </Pressable>
+        {models?.map((m) => (
+          <Pressable key={m.id} onPress={() => update({ titleModel: m.id })}>
+            <Row label={m.displayName} selected={prefs.titleModel === m.id} />
+          </Pressable>
+        ))}
+        <Pressable onPress={() => update({ titleModel: "off" })}>
+          <Row label="Off" hint="Name chats after the first line of your message." selected={prefs.titleModel === "off"} />
+        </Pressable>
+      </Section>
+
       <Section title="Permissions for new chats">
         {ACCESS.map((a) => (
           <Pressable key={a.id} onPress={() => update({ access: a.id })}>
@@ -170,7 +233,7 @@ function Row({ label, hint, selected, danger, right }: { label: string; hint?: s
   );
 }
 
-const styles = StyleSheet.create({
+const styles = sheet(() => ({
   wrap: { padding: 20, paddingBottom: 40 },
   h1: { color: c.text, fontSize: 30, fontWeight: "700", letterSpacing: -0.5 },
   sectionTitle: { color: c.faint, fontSize: 11.5, fontWeight: "700", letterSpacing: 0.8, marginBottom: 8, marginLeft: 4 },
@@ -190,5 +253,14 @@ const styles = StyleSheet.create({
   chipText: { color: c.muted, fontSize: 13.5, fontWeight: "600", textTransform: "capitalize" },
   enable: { height: 32, paddingHorizontal: 14, borderRadius: 10, backgroundColor: c.text, justifyContent: "center" },
   enableText: { color: c.bg, fontSize: 13, fontWeight: "700" },
+  themes: { flexDirection: "row", gap: 12, padding: 14, paddingBottom: 6 },
+  themeOpt: { flex: 1, alignItems: "center", gap: 7 },
+  swatch: { width: "100%", height: 58, borderRadius: 12, borderWidth: 2, borderColor: c.border, overflow: "hidden" },
+  swatchHalf: { flex: 1, padding: 9, gap: 6 },
+  swatchLine: { height: 5, width: "75%", borderRadius: 3 },
+  themeLabel: { color: c.muted, fontSize: 12.5, fontWeight: "600" },
+  accents: { flexDirection: "row", flexWrap: "wrap", gap: 10, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 14 },
+  dotRing: { width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: "transparent", alignItems: "center", justifyContent: "center" },
+  accentDot: { width: 24, height: 24, borderRadius: 12 },
   about: { color: c.faint, fontSize: 12, textAlign: "center", marginTop: 28 },
-});
+}));

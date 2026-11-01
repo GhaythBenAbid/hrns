@@ -1,0 +1,20 @@
+_hrns_dir="$ZDOTDIR"
+ZDOTDIR="$HRNS_USER_ZDOTDIR"
+[[ -f "$ZDOTDIR/.zshrc" ]] && source "$ZDOTDIR/.zshrc"
+# From here on zsh reads the user's files (.zlogin, and nothing of ours).
+unset _hrns_dir
+
+# Command markers (FinalTerm / VS Code style), read by the phone to draw each command as a card:
+#   OSC 633;E;<command>   the command line      OSC 133;C   output starts
+#   OSC 133;D;<status>    command finished      OSC 7       current folder
+__hrns_preexec() {
+  local cmd="${1//[$'\a\e']/}"
+  printf '\e]633;E;%s\a\e]133;C\a' "$cmd"
+}
+__hrns_precmd() {
+  local st=$?
+  printf '\e]133;D;%s\a\e]7;file://%s%s\a\e]133;A\a' "$st" "${HOST:-localhost}" "$PWD"
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook preexec __hrns_preexec
+add-zsh-hook precmd __hrns_precmd

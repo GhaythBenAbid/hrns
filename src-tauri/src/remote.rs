@@ -114,6 +114,15 @@ impl Remote {
             .route("/api/stop", post(stop))
             .route("/api/approval", post(approval))
             .route("/api/events", get(events))
+            .route("/api/projects", get(projects))
+            .route("/api/projects/icon", get(project_icon))
+            .route("/api/git/status", get(git_status))
+            .route("/api/git/diff", get(git_diff))
+            .route("/api/title", post(title))
+            .route("/api/terminals", get(terminals).post(terminal_open))
+            .route("/api/terminals/{id}", axum::routing::delete(terminal_close))
+            .route("/api/terminals/{id}/ws", get(terminal_ws))
+            .route("/api/terminal.html", get(terminal_page))
             .layer(middleware::from_fn_with_state(ctx.clone(), auth))
             .with_state(ctx);
 
@@ -393,6 +402,171 @@ async fn pump(mut socket: WebSocket, mut rx: broadcast::Receiver<String>) {
                 Err(_) => break,
             },
             incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                _ => {}
+            },
+        }
+    }
+}
+
+// ---------- projects, git changes and chat titles (mirrors the desktop commands) ----------
+
+async fn projects() -> Response {
+    match tokio::task::spawn_blocking(crate::projects::find).await {
+        Ok(p) => Json(json!(p)).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct PathQuery {
+    path: String,
+}
+
+async fn project_icon(Query(q): Query<PathQuery>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::projects::icon(&q.path)).await {
+        Ok(i) => Json(json!(i)).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+async fn git_status(Query(q): Query<PathQuery>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::git::status(&q.path)).await {
+        Ok(s) => Json(json!(s)).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct DiffQuery {
+    root: String,
+    path: String,
+    old: Option<String>,
+    #[serde(default)]
+    untracked: bool,
+}
+
+/// Paths are relative to the repo root; refuse anything that could step outside it.
+fn inside_repo(p: &str) -> bool {
+    let p = std::path::Path::new(p);
+    !p.is_absolute() && p.components().all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+}
+
+async fn git_diff(Query(q): Query<DiffQuery>) -> Response {
+    if !inside_repo(&q.path) || q.old.as_deref().is_some_and(|o| !inside_repo(o)) {
+        return err("bad path");
+    }
+    match tokio::task::spawn_blocking(move || crate::git::file_diff(&q.root, &q.path, q.old.as_deref(), q.untracked)).await {
+        Ok(d) => Json(json!({ "diff": d })).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TitleBody {
+    thread_id: String,
+    model: String,
+    effort: Option<String>,
+}
+
+/// Have `model` name a chat from its first message; phones also get a `thread-title` event.
+async fn title(State(ctx): State<Ctx>, Json(b): Json<TitleBody>) -> Response {
+    let Some(t) = store(&ctx).get(&b.thread_id) else { return err("no such chat") };
+    let Some(first) = t.messages.iter().find(|m| m.role == "user").map(|m| m.text.clone()) else { return err("Chat has no message yet") };
+    let engine = match accounts(&ctx).engine_for(&t) {
+        Ok(e) => e,
+        Err(e) => return err(e),
+    };
+    match engine.generate_title(b.thread_id, first, b.model, b.effort).await {
+        Ok(title) => Json(json!({ "title": title })).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+// ---------- terminal (shared with the desktop panel) ----------
+
+fn terms(ctx: &Ctx) -> Arc<crate::terminal::Terminals> {
+    ctx.remote.app.state::<Arc<crate::terminal::Terminals>>().inner().clone()
+}
+
+async fn terminals(State(ctx): State<Ctx>) -> Json<Value> {
+    Json(json!(terms(&ctx).list()))
+}
+
+#[derive(Deserialize)]
+struct OpenBody {
+    cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+}
+
+async fn terminal_open(State(ctx): State<Ctx>, Json(b): Json<OpenBody>) -> Response {
+    match terms(&ctx).open(b.cwd, b.cols.unwrap_or(48), b.rows.unwrap_or(30)) {
+        Ok(info) => Json(json!(info)).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+async fn terminal_close(State(ctx): State<Ctx>, Path(id): Path<String>) -> Json<Value> {
+    terms(&ctx).close(&id);
+    Json(json!({ "ok": true }))
+}
+
+/// The phone's terminal view: xterm.js in a WebView, talking to `/ws` below.
+async fn terminal_page() -> Response {
+    static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let page = PAGE.get_or_init(|| {
+        include_str!("assets/terminal.html")
+            .replace("/*XTERM_CSS*/", include_str!("../../node_modules/@xterm/xterm/css/xterm.css"))
+            .replace("/*XTERM_JS*/", include_str!("../../node_modules/@xterm/xterm/lib/xterm.js"))
+            .replace("/*FIT_JS*/", include_str!("../../node_modules/@xterm/addon-fit/lib/addon-fit.js"))
+    });
+    ([(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"), (axum::http::header::CACHE_CONTROL, "no-store")], page.clone()).into_response()
+}
+
+async fn terminal_ws(State(ctx): State<Ctx>, Path(id): Path<String>, ws: WebSocketUpgrade) -> Response {
+    let terms = terms(&ctx);
+    ws.on_upgrade(move |socket| terminal_pump(socket, terms, id))
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum TermIn {
+    Input { data: String },
+    Resize { cols: u16, rows: u16 },
+}
+
+async fn terminal_pump(mut socket: WebSocket, terms: Arc<crate::terminal::Terminals>, id: String) {
+    use crate::terminal::Out;
+    let Ok((scrollback, alive, mut rx)) = terms.attach(&id) else {
+        let _ = socket.send(Message::Text(json!({ "type": "gone" }).to_string().into())).await;
+        return;
+    };
+    let size = terms.size(&id).unwrap_or((80, 24));
+    if socket.send(Message::Text(json!({ "type": "init", "data": scrollback, "alive": alive, "cols": size.0, "rows": size.1 }).to_string().into())).await.is_err() {
+        return;
+    }
+    loop {
+        tokio::select! {
+            out = rx.recv() => match out {
+                Ok(Out::Data(d)) => if socket.send(Message::Text(json!({ "type": "data", "data": d }).to_string().into())).await.is_err() { break },
+                Ok(Out::Size(cols, rows)) => if socket.send(Message::Text(json!({ "type": "size", "cols": cols, "rows": rows }).to_string().into())).await.is_err() { break },
+                Ok(Out::Exit) => { let _ = socket.send(Message::Text(json!({ "type": "exit" }).to_string().into())).await; }
+                // Fell behind: start over from the scrollback rather than show a hole.
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let Ok((sb, alive, fresh)) = terms.attach(&id) else { break };
+                    rx = fresh;
+                    if socket.send(Message::Text(json!({ "type": "init", "data": sb, "alive": alive }).to_string().into())).await.is_err() { break }
+                }
+                Err(_) => { let _ = socket.send(Message::Text(json!({ "type": "gone" }).to_string().into())).await; break }
+            },
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Text(t))) => match serde_json::from_str::<TermIn>(&t) {
+                    Ok(TermIn::Input { data }) => { let _ = terms.write(&id, &data); }
+                    Ok(TermIn::Resize { cols, rows }) => { let _ = terms.resize(&id, cols, rows); }
+                    Err(_) => {}
+                },
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                 _ => {}
             },

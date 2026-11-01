@@ -27,7 +27,12 @@ export type RateWindow = { usedPercent: number; windowDurationMins: number; rese
 export type AccountStatus = { account: { email?: string; planType?: string } | null; rateLimits: { primary: RateWindow; secondary: RateWindow } | null };
 export type UsageRow = { hour: string; source: string; model: string; input: number; cached: number; output: number; reasoning: number; requests: number };
 export type Price = { input?: number | null; output?: number | null; cached?: number | null };
-export type Prefs = { model?: string; effort?: string; access?: "read-only" | "auto" | "full"; account?: string };
+export type Prefs = { model?: string; effort?: string; access?: "read-only" | "auto" | "full"; account?: string; titleModel?: string };
+export type Project = { path: string; modified: number };
+export type ProjectIcon = { image: string | null; tech: string | null };
+export type GitFile = { path: string; old: string | null; kind: "add" | "delete" | "rename" | "update"; add: number; del: number; binary: boolean; untracked: boolean };
+export type TermInfo = { id: string; cwd: string; title: string; alive: boolean; createdAt: number };
+export type GitStatus = { root: string; rev: string; files: GitFile[]; add: number; del: number };
 
 export type ChatEvent =
   | { kind: "part"; threadId: string; part: Part }
@@ -40,6 +45,8 @@ export type ChatEvent =
 export type ServerEvent =
   | { type: "chat"; payload: ChatEvent }
   | { type: "notify"; payload: { title: string; body: string; threadId?: string } }
+  | { type: "thread-title"; payload: { threadId: string; title: string } }
+  | { type: "terminals"; payload: TermInfo[] }
   | { type: "resync" }
   | { type: "connection"; connected: boolean };
 
@@ -62,9 +69,9 @@ export class Client {
 
   constructor(readonly server: Server) {}
 
-  private async req<T>(path: string, init?: RequestInit): Promise<T> {
+  private async req<T>(path: string, init?: RequestInit, timeout = 15000): Promise<T> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const timer = setTimeout(() => ctrl.abort(), timeout);
     try {
       const res = await fetch(this.server.url + path, {
         ...init,
@@ -92,6 +99,26 @@ export class Client {
   pricing = (models: string[]) => this.req<Record<string, Price>>("/api/pricing", { method: "POST", body: JSON.stringify({ models }) });
   send = (body: { threadId?: string; text: string; cwd?: string | null } & Prefs) => this.req<Thread>("/api/send", { method: "POST", body: JSON.stringify(body) });
   stop = (threadId: string) => this.req("/api/stop", { method: "POST", body: JSON.stringify({ threadId }) });
+  // Walks the Mac's code folders; can take a while on a big home folder.
+  projects = () => this.req<Project[]>("/api/projects", undefined, 60000);
+  projectIcon = (path: string) => this.req<ProjectIcon>(`/api/projects/icon?path=${encodeURIComponent(path)}`);
+  /** null when the folder isn't inside a git repository. */
+  gitStatus = (path: string) => this.req<GitStatus | null>(`/api/git/status?path=${encodeURIComponent(path)}`);
+  gitDiff = (root: string, f: GitFile) =>
+    this.req<{ diff: string | null }>(
+      `/api/git/diff?root=${encodeURIComponent(root)}&path=${encodeURIComponent(f.path)}${f.old ? `&old=${encodeURIComponent(f.old)}` : ""}&untracked=${f.untracked}`,
+    ).then((r) => r.diff);
+  title = (threadId: string, model: string, effort: string | null) =>
+    this.req<{ title: string }>("/api/title", { method: "POST", body: JSON.stringify({ threadId, model, effort }) }, 60000).then((r) => r.title);
+  terminals = () => this.req<TermInfo[]>("/api/terminals");
+  openTerminal = (cwd: string | null) => this.req<TermInfo>("/api/terminals", { method: "POST", body: JSON.stringify({ cwd }) });
+  closeTerminal = (id: string) => this.req(`/api/terminals/${encodeURIComponent(id)}`, { method: "DELETE" });
+  /** The xterm page the Mac serves for one session, themed to match the app. */
+  terminalPage = (id: string, o: { scheme: string; bg: string; fg: string; accent: string; size: number }) =>
+    `${this.server.url}/api/terminal.html?` +
+    [["id", id], ["token", this.server.token], ["scheme", o.scheme], ["bg", o.bg.slice(1)], ["fg", o.fg.slice(1)], ["accent", o.accent.slice(1)], ["size", String(o.size)]]
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+      .join("&");
   approve = (key: string, decision: "accept" | "acceptForSession" | "decline") =>
     this.req("/api/approval", { method: "POST", body: JSON.stringify({ key, decision }) });
 
