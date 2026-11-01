@@ -9,7 +9,23 @@ permissions:
   contents: write
 
 jobs:
+  # Releases ship from main only: refuse tags that point outside main.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag must be on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main. Merge dev into main, then tag."
+            exit 1
+          fi
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
